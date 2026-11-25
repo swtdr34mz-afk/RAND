@@ -19,7 +19,6 @@ void rnd_init(rnd_engine *e, float sample_rate)
     }
     e->cur = -1;
     e->clock_override = -1;
-    e->last_clock = -1.0;
 }
 
 void rnd_set(rnd_engine *e, int id, float norm)
@@ -37,8 +36,8 @@ float rnd_get(const rnd_engine *e, int id) { return id >= 0 && id < RP_COUNT ? e
 
 float rnd_bpm(const rnd_engine *e)
 {
-    if (e->ext && e->ext_bpm > 0.0)
-        return (float)e->ext_bpm;
+    if (e->ext && e->ext_bpm > 0.0f)
+        return e->ext_bpm;
     return 40.0f + e->p[RP_TEMPO] * 240.0f;
 }
 
@@ -54,18 +53,18 @@ int rnd_length(const rnd_engine *e)
     return l < 1 ? 1 : l > RND_STEPS ? RND_STEPS : l;
 }
 
-static double samples_per_step(const rnd_engine *e)
+static float samples_per_step(const rnd_engine *e)
 {
     int ci = e->clock_override >= 0 ? e->clock_override : rnd_clock_index(e);
-    double sps = rnd_bpm(e) / 60.0 * 4.0 * RND_CLOCK_MULT[ci], s = e->sr / sps;
-    return s < 4.0 ? 4.0 : s;
+    float sps = rnd_bpm(e) / 60.0f * 4.0f * RND_CLOCK_MULT[ci], s = e->sr / sps;
+    return s < 4.0f ? 4.0f : s;
 }
 
 void rnd_start(rnd_engine *e)
 {
     e->running = 1;
     e->cur = -1;
-    e->to_next = 0.0;
+    e->to_next = 0.0f;
 }
 void rnd_stop(rnd_engine *e)
 {
@@ -83,15 +82,15 @@ void rnd_trigger(rnd_engine *e, float pitch, float vel) { voice_trigger(&e->v, p
 /* 24 Pulse pro Viertel: das Tempo aus dem Abstand gemessen, leicht geglättet */
 void rnd_midi_clock(rnd_engine *e)
 {
-    if (e->last_clock >= 0.0) {
-        double d = e->counter - e->last_clock;
-        if (d > 0.0 && d < e->sr) {
-            double b = e->sr * 60.0 / (d * 24.0);
-            if (b >= 20.0 && b <= 400.0)
-                e->ext_bpm = e->ext_bpm <= 0.0 ? b : e->ext_bpm * 0.9 + b * 0.1;
+    if (e->last_clock) {
+        uint32_t d = e->counter - e->last_clock;
+        if (d > 0u && (float)d < e->sr) {
+            float b = e->sr * 60.0f / ((float)d * 24.0f);
+            if (b >= 20.0f && b <= 400.0f)
+                e->ext_bpm = e->ext_bpm <= 0.0f ? b : e->ext_bpm * 0.9f + b * 0.1f;
         }
     }
-    e->last_clock = e->counter;
+    e->last_clock = e->counter ? e->counter : 1u;
     e->ext = 1;
 }
 
@@ -111,23 +110,23 @@ void rnd_render(rnd_engine *e, float *out, int n)
         int chunk = n - done;
         if (e->running) {
             int until;
-            if (e->to_next <= 0.0) {
+            if (e->to_next <= 0.0f) {
                 advance(e);
                 e->to_next += samples_per_step(e);
             }
             until = (int)e->to_next;
-            if ((double)until < e->to_next)
+            if ((float)until < e->to_next)
                 until++;
             if (until < chunk)
                 chunk = until < 1 ? 1 : until;
         }
         voice_render(&e->v, out + done, chunk);
         if (e->running)
-            e->to_next -= chunk;
+            e->to_next -= (float)chunk;
         done += chunk;
     }
-    e->counter += n;
-    if (e->ext && e->counter - e->last_clock > e->sr)   /* eine Sekunde ohne Clock: wieder eigenes Tempo */
+    e->counter += (uint32_t)n;
+    if (e->ext && (float)(e->counter - e->last_clock) > e->sr)   /* eine Sekunde ohne Clock: wieder eigenes Tempo */
         e->ext = 0;
 }
 

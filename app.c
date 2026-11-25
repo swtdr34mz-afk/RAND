@@ -8,7 +8,8 @@
  *   weiße Tasten 9-16   Pads: spielen Step 1-8 von Hand
  *   schwarze Tasten 1-5 gehalten: Takt sofort x2, x4, x8, x32, x128 (der EDGE-Trick), losgelassen zurück
  *   K1..K4              die vier Regler der Seite
- *   HOME VCO, SEL MOD, ENV MIX, LFO VCF, EDIT VCA, FX OUT, GLO SWITCH   die Klang-Seiten (nochmal: zurück zu VCO)
+ *   HOME OSC 1, SEL OSC 2, ENV EG/FM/NOISE, LFO FILTER, EDIT OUTPUT, FX MOD, GLO SWITCHES   die Klang-Seiten wie
+ *                       die Felder am EDGE (nochmal: zurück zu OSC 1)
  *   SEQ                 die Reihen: PITCH 1-4, PITCH 5-8, VEL 1-4, VEL 5-8 (K1..K4 = vier Steps)
  *   SELECT              Tempo        ALGORITHM   CLOCK: /4 .. x128        PRESET   die Presets
  *   OCT- / OCT+         Länge 1..8   ARP         RAND: neue Zufalls-Reihen   PLAY   Start / Stop
@@ -18,8 +19,6 @@
 #include "fastmath.h"
 #include "rand_core.h"
 
-#define PINK RGB(255, 46, 136)
-#define PINK_DIM RGB(96, 18, 52)
 #define SR 44100.0f
 
 static rnd_engine eng;
@@ -124,18 +123,19 @@ static void hit(float pitch, float vel)
 }
 
 /* ------------------------------------------------------------------- Seiten --- */
-enum { PG_VCO, PG_MOD, PG_MIX, PG_VCF, PG_VCA, PG_OUT, PG_SW, PG_PA, PG_PB, PG_VA, PG_VB, NPAGES };
+enum { PG_VCO, PG_OSC2, PG_EGN, PG_VCF, PG_OUT, PG_MOD2, PG_SW, PG_PA, PG_PB, PG_VA, PG_VB, NPAGES };
 #define NSOUND PG_PA
-static const char *const PAGE_NAME[NPAGES] = {"VCO", "MOD", "MIX", "VCF", "VCA", "OUT", "SWITCH",
-                                              "PITCH 1-4", "PITCH 5-8", "VEL 1-4", "VEL 5-8"};
+static const char *const PAGE_NAME[NPAGES] = {"OSC 1", "OSC 2", "EG / FM / NOISE", "FILTER", "OUTPUT", "MOD",
+                                              "SWITCHES", "PITCH 1-4", "PITCH 5-8", "VEL 1-4", "VEL 5-8"};
+/* die Seiten wie die Felder am EDGE-Panel, von links nach rechts */
 static const uint8_t PAGE_P[NSOUND][4] = {
-    {RP_VCO1_FREQ, RP_VCO2_FREQ, RP_FM, RP_PITCH_DECAY},
-    {RP_VCO1_EG, RP_VCO2_EG, RP_VCO1_SEQ, RP_VCO2_SEQ},
-    {RP_VCO1_LVL, RP_VCO2_LVL, RP_NOISE_LVL, RP_NOISE_COLOR},
-    {RP_CUTOFF, RP_RESO, RP_VCF_EG, RP_VCF_DECAY},
-    {RP_VCA_DECAY, RP_VEL_VCA, RP_VEL_VCF, RP_NOISE_VCF},
-    {RP_DRIVE, RP_VOLUME, RP_LENGTH, RP_VCA_ATTACK},
-    {RP_VCO1_WAVE, RP_VCO2_WAVE, RP_SYNC, RP_FILTER_MODE},
+    {RP_VCO1_FREQ, RP_VCO1_EG, RP_VCO1_SEQ, RP_VCO1_LVL},        /* OSCILLATOR (VCO 1) */
+    {RP_VCO2_FREQ, RP_VCO2_EG, RP_VCO2_SEQ, RP_VCO2_LVL},        /* OSCILLATOR (VCO 2) */
+    {RP_PITCH_DECAY, RP_FM, RP_NOISE_LVL, RP_NOISE_COLOR},       /* EG (VCO 1&2), 1-2 FM AMT, NOISE */
+    {RP_CUTOFF, RP_RESO, RP_VCF_DECAY, RP_VCF_EG},               /* FILTER (VCF) */
+    {RP_VCA_ATTACK, RP_VCA_DECAY, RP_VOLUME, RP_DRIVE},          /* OUTPUT (VCA), dazu DRIVE */
+    {RP_NOISE_VCF, RP_VEL_VCF, RP_VEL_VCA, RP_LENGTH},           /* MOD: was der EDGE über Kabel macht */
+    {RP_VCO1_WAVE, RP_VCO2_WAVE, RP_SYNC, RP_FILTER_MODE},       /* die Kippschalter */
 };
 
 static struct {
@@ -432,7 +432,7 @@ static void step_up(void)                /* kurz getippt: an / aus */
 
 static void button(uint32_t i)
 {
-    static const int8_t PAGE_OF[NB] = {PG_OUT, PG_MOD, PG_MIX, PG_VCF, PG_VCA, PG_SW, PG_VCO, -1, -1, -1, -1, -1,
+    static const int8_t PAGE_OF[NB] = {PG_MOD2, PG_OSC2, PG_EGN, PG_VCF, PG_OUT, PG_SW, PG_VCO, -1, -1, -1, -1, -1,
                                        -1, -1};
     if (PAGE_OF[i] >= 0) {
         int pg = PAGE_OF[i];
@@ -444,7 +444,7 @@ static void button(uint32_t i)
     case B_PLAY: play_toggle(); break;
     case B_REC: ui.rec_t = plat_ms(); break;
     case B_ARP:
-        rnd_randomize(&eng, plat_ms() * 2654435761u ^ (uint32_t)eng.counter);
+        rnd_randomize(&eng, plat_ms() * 2654435761u ^ eng.counter);
         settings_from_engine();
         dirty();
         app_say("RAND", "NEW ROWS");
@@ -568,25 +568,102 @@ static void lights(void)
 }
 
 /* ----------------------------------------------------------------- Zeichnen --- */
+/* Die Optik der Moog-Eurorack-Kisten (DFAM, Mother-32): schwarzes Panel, weiße Schrift, schwarze Regler mit
+ * Silberkappe und Skala, Holzwangen links und rechts, rote LEDs unter den Steps. Unten die zwei Reglerreihen des DFAM:
+ * acht für die Tonhöhe, acht für die Lautstärke, die LED des laufenden Steps dazwischen. */
+#define C_PANEL RGB(10, 10, 12)
+#define C_LABEL RGB(236, 236, 240)
+#define C_SUB RGB(140, 140, 148)
+#define C_TICK RGB(120, 120, 128)
+#define C_KBODY RGB(26, 26, 29)
+#define C_KEDGE RGB(78, 78, 84)
+#define C_SILVER RGB(176, 176, 182)
+#define C_SILVER_HI RGB(232, 232, 236)
+#define C_LED RGB(255, 38, 26)
+#define C_LED_DIM RGB(64, 12, 10)
+#define C_WOOD RGB(112, 60, 32)
+#define C_GRAIN RGB(78, 40, 20)
+
 static void ctext(int32_t cx, int32_t y, const felucca_font_t *f, const char *s, uint16_t c)
 {
     cv_text(cx - text_w(f, s) / 2, y, f, s, c);
 }
 
-/* die Kante: das Markenzeichen von RAND, ein schräger Streifen */
-static void edge(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t c)
+static void wood(int32_t h, int32_t y0)  /* die Holzwangen, mit Maserung (fest an der Bildschirmhöhe) */
 {
-    int32_t j;
-    for (j = 0; j < h; j++)
-        cv_rect(x + (h - j) / 2, y + j, w, 1, c);
+    int32_t y;
+    cv_rect(0, 0, 5, h, C_WOOD);
+    cv_rect(235, 0, 5, h, C_WOOD);
+    for (y = 0; y < h; y++) {
+        int32_t g = (y + y0) % 23;
+        if (g == 0 || g == 9)
+            cv_rect(1 + (g ? 2 : 0), y, 1, 6, C_GRAIN);
+        if (g == 4 || g == 15)
+            cv_rect(236 + (g == 4 ? 2 : 0), y, 1, 5, C_GRAIN);
+    }
 }
 
-static void draw_knob(int k, int32_t x, int32_t y, uint32_t now)
+static void disc(int32_t cx, int32_t cy, int32_t r, uint16_t c)
+{
+    int32_t dy;
+    for (dy = -r; dy <= r; dy++) {
+        int32_t w = 0;
+        while ((w + 1) * (w + 1) + dy * dy <= r * r)
+            w++;
+        cv_rect(cx - w, cy + dy, 2 * w + 1, 1, c);
+    }
+}
+
+/* ein Regler: Skala (11 Striche über 270°), schwarzer Körper, Silberkappe, weißer Zeiger. v 0..1 */
+static void moog_knob(int32_t cx, int32_t cy, int32_t r, float v, int hot, int bip, int ticks)
+{
+    int32_t i, cap = r * 11 / 20;
+    float a, sn, cs;
+    if (ticks)
+        for (i = 0; i <= 10; i++) {
+            a = (-135.0f + 27.0f * (float)i) * 0.017453293f;
+            sn = fm_sinf(a);
+            cs = fm_cosf(a);
+            cv_line(cx + (int32_t)(sn * (float)(r + 2)), cy - (int32_t)(cs * (float)(r + 2)),
+                    cx + (int32_t)(sn * (float)(r + (i == 5 && bip ? 5 : 4))),
+                    cy - (int32_t)(cs * (float)(r + (i == 5 && bip ? 5 : 4))), i == 5 && bip ? C_LABEL : C_TICK);
+        }
+    disc(cx, cy, r, hot ? C_SUB : C_KEDGE);
+    disc(cx, cy, r - 1, C_KBODY);
+    a = (-135.0f + 270.0f * fm_clampf(v, 0.0f, 1.0f)) * 0.017453293f;
+    sn = fm_sinf(a);
+    cs = fm_cosf(a);
+    for (i = cap + 1; i < r; i++) {      /* der Zeiger auf dem Rock, zwei Pixel breit */
+        int32_t px = cx + (int32_t)(sn * (float)i), py = cy - (int32_t)(cs * (float)i);
+        cv_rect(px, py, 2, 2, C_LABEL);
+    }
+    disc(cx, cy, cap, C_SILVER);
+    disc(cx - cap / 3, cy - cap / 3, cap / 2, C_SILVER_HI);
+}
+
+/* ein Kippschalter: Mutter, Hebel nach oben (an) oder unten, die zwei Namen */
+static void toggle(int32_t cx, int32_t cy, int on, const char *up, const char *dn, int hot)
+{
+    ctext(cx, cy - 24, &FONT_XS, up, on ? C_LABEL : C_SUB);
+    ctext(cx, cy + 13, &FONT_XS, dn, on ? C_SUB : C_LABEL);
+    disc(cx, cy, 6, hot ? C_SUB : C_KEDGE);
+    disc(cx, cy, 4, C_SILVER);
+    cv_rect(cx - 1, on ? cy - 10 : cy, 3, 11, C_SILVER_HI);
+    disc(cx, on ? cy - 11 : cy + 11, 2, C_SILVER_HI);
+}
+
+static void led(int32_t cx, int32_t cy, int on)
+{
+    disc(cx, cy, 3, on ? C_LED : C_LED_DIM);
+    if (on)
+        cv_rect(cx - 1, cy - 2, 2, 1, RGB(255, 170, 160));
+}
+
+static void draw_knob(int k, int32_t cx, int32_t y, uint32_t now)
 {
     knob_t kb = knob_of(k);
-    int32_t v = knob_get(kb), w = 54;
-    int hot = ui.knob_at[k] && now - ui.knob_at[k] < 600u;
-    int bipolar;
+    int32_t v = knob_get(kb);
+    int hot = ui.knob_at[k] && now - ui.knob_at[k] < 600u, bipolar;
     char t[16], name[12] = "";
     if (v < 0)
         return;
@@ -594,16 +671,21 @@ static void draw_knob(int k, int32_t x, int32_t y, uint32_t now)
         text_cat(name, RND_PARAMS[kb.id].label);
         bipolar = RND_PARAMS[kb.id].kind == RK_BIP;
         val_text(kb.id, (uint8_t)v, t);
+        if (RND_PARAMS[kb.id].kind == RK_SWITCH) {
+            ctext(cx, y, &FONT_XS, name, hot ? C_LED : C_LABEL);
+            toggle(cx, y + 40, v >= 64, RND_PARAMS[kb.id].on, RND_PARAMS[kb.id].off, hot);
+            return;
+        }
     } else {
         if (ui.held >= 0) {
-            text_cat(name, kb.vel ? "VEL" : "PITCH");
+            text_cat(name, kb.vel ? "VELOCITY" : "PITCH");
         } else {
             text_cat(name, "STEP ");
             int_text(kb.step + 1, name + 5);
         }
         bipolar = !kb.vel;
+        t[0] = 0;
         if (bipolar) {
-            t[0] = 0;
             if (v > 64)
                 text_cat(t, "+");
             int_text(v - 64, t + strlen(t));
@@ -611,113 +693,104 @@ static void draw_knob(int k, int32_t x, int32_t y, uint32_t now)
             int_text(v * 100 / 127, t);
         }
     }
-    cv_text(x, y, &FONT_XS, name, hot ? C_WHITE : C_GRAY);
-    cv_rect(x, y + 14, w, 8, C_LINE);
-    if (kb.id >= 0 && RND_PARAMS[kb.id].kind == RK_SWITCH) {   /* Schalter: zwei Felder */
-        int on = v >= 64;
-        cv_rect(x + 1 + (on ? w / 2 : 0), y + 15, w / 2 - 2, 6, on ? PINK : C_GRAY);
-    } else if (bipolar) {
-        int32_t c = x + w / 2, f = ((v - 64) * (w / 2 - 1)) / 63;
-        if (f >= 0)
-            cv_rect(c, y + 15, f, 6, hot ? PINK : C_HI);
-        else
-            cv_rect(c + f, y + 15, -f, 6, hot ? PINK : C_HI);
-        cv_rect(c, y + 13, 1, 10, C_GRAY);
-    } else {
-        cv_rect(x + 1, y + 15, (v * (w - 2)) / 127, 6, hot ? PINK : C_HI);
-    }
-    ctext(x + w / 2, y + 26, &FONT_XS, t, hot ? C_WHITE : C_AMB);
+    ctext(cx, y, &FONT_XS, name, hot ? C_LED : C_LABEL);
+    moog_knob(cx, y + 34, 14, (float)v / 127.0f, hot, bipolar, 1);
+    ctext(cx, y + 56, &FONT_XS, t, hot ? C_LABEL : C_SUB);
 }
 
-/* die Seiten als Leiste: sieben Klang-Seiten, dann die vier Reihen-Seiten */
-static void draw_page_bar(int32_t y)
+/* wo man ist: die Seiten als kleine graue Taster, die aktuelle weiß */
+static void draw_page_keys(int32_t y)
 {
-    int32_t x = 4, w = 22;
     uint32_t p;
+    int32_t x = 236 - (int32_t)NPAGES * 8 - 6;
     for (p = 0; p < NPAGES; p++) {
-        int cur = p == ui.page;
         if (p == NSOUND)
-            x += 8;
-        cv_rect(x, cur ? y : y + 1, w - (p >= NSOUND ? 6 : 0), cur ? 4 : 2, cur ? PINK : C_DIM);
-        x += w - (p >= NSOUND ? 6 : 0) + 2;
+            x += 6;
+        cv_rect(x, y, 6, 6, p == ui.page ? C_LABEL : RGB(60, 60, 64));
+        x += 8;
     }
 }
 
-/* CLOCK: die elf Stufen als Leiter, ab x32 der hörbare Bereich */
+/* CLOCK: elf LEDs von /4 bis x128; ab x32 hörbar (AUDIO) */
 static void draw_clock(int32_t y)
 {
     int idx = eng.clock_override >= 0 ? eng.clock_override : rnd_clock_index(&eng);
     uint32_t i;
     char t[16] = "CLOCK ";
     text_cat(t, RND_CLOCK_NAME[idx]);
-    cv_text(4, y, &FONT_XS, t, eng.clock_override >= 0 ? C_WHITE : C_AMB);
-    for (i = 0; i < RND_NCLOCK; i++) {
-        int32_t x = 96 + (int32_t)i * 13, h = 4 + (int32_t)i;
-        uint16_t c = (int)i == idx ? (i >= 8u ? PINK : C_WHITE) : i >= 8u ? PINK_DIM : C_LINE;
-        cv_rect(x, y + 14 - h, 10, h, c);
-    }
+    cv_text(10, y, &FONT_XS, t, eng.clock_override >= 0 ? C_LED : C_LABEL);
+    for (i = 0; i < RND_NCLOCK; i++)
+        led(98 + (int32_t)i * 12, y + 6, (int)i == idx);
+    cv_rect(98 + 8 * 12 - 4, y + 12, 3 * 12 - 4, 1, C_SUB);   /* ab hier hörbar: der Takt wird ein Ton */
+    cv_rect(98 + 8 * 12 - 4, y + 10, 1, 2, C_SUB);
+    cv_rect(98 + 10 * 12 + 4, y + 10, 1, 2, C_SUB);
 }
 
 static void draw_middle(uint32_t now)
 {
     uint32_t i;
     char t[24];
-    draw_page_bar(3);
-    if (now < ui.big_until) {
-        ctext(120, 16, &FONT_XS, ui.big[1], C_GRAY);
-        ctext(120, 32, &APP_BIG_FONT, ui.big[0], PINK);
-        draw_clock(88);
-        return;
-    }
-    for (i = 0; i < 4u; i++)
-        draw_knob((int)i, 4 + (int32_t)i * 59, 14, now);
+    wood(110, 30);
     if (ui.held >= 0) {
         t[0] = 0;
         text_cat(t, "STEP ");
         int_text(ui.held + 1, t + 5);
-        cv_text(4, 62, &FONT_XS, t, C_WHITE);
-        cv_text(60, 62, &FONT_XS, eng.steps[ui.held].on ? "ON" : "OFF", eng.steps[ui.held].on ? PINK : C_DIM);
+        cv_text(10, 3, &FONT_XS, t, C_LABEL);
+        cv_text(60, 3, &FONT_XS, eng.steps[ui.held].on ? "ON" : "OFF", eng.steps[ui.held].on ? C_LED : C_SUB);
     } else {
-        int32_t x = cv_text(4, 62, &FONT_XS, PAGE_NAME[ui.page], C_HI);
-        cv_text(x + 10, 62, &FONT_XS, rnd_preset_name(set.preset), PINK);
-        t[0] = 0;
-        text_cat(t, "LEN ");
-        int_text(rnd_length(&eng), t + 4);
-        cv_text(236 - text_w(&FONT_XS, t), 62, &FONT_XS, t, C_AMB);
+        int32_t x = cv_text(10, 3, &FONT_XS, PAGE_NAME[ui.page], C_LABEL);
+        cv_text(x + 8, 3, &FONT_XS, rnd_preset_name(set.preset), C_SUB);
     }
-    cv_rect(0, 80, 240, 1, C_LINE);
-    draw_clock(88);
+    draw_page_keys(6);
+    cv_rect(8, 17, 224, 1, RGB(44, 44, 48));
+    if (now < ui.big_until) {
+        ctext(120, 24, &FONT_XS, ui.big[1], C_SUB);
+        ctext(120, 40, &APP_BIG_FONT, ui.big[0], C_LABEL);
+    } else {
+        for (i = 0; i < 4u; i++)
+            draw_knob((int)i, 34 + (int32_t)i * 57, 21, now);
+    }
+    draw_clock(93);
 }
 
-/* die zwei Reihen: oben die Tonhöhe als Balken auf ihrer Höhe, unten die Lautstärke */
+/* die zwei Reihen des DFAM: oben PITCH, unten VELOCITY, dazwischen die LED; darunter die Nummer */
 static void draw_steps(int32_t s)
 {
     uint32_t i;
     int32_t len = rnd_length(&eng);
+    wood(100, 140);
+    cv_text(9, 1, &FONT_XS, "P", C_SUB);
+    cv_text(9, 50, &FONT_XS, "V", C_SUB);
     for (i = 0; i < RND_STEPS; i++) {
-        int32_t x = 6 + (int32_t)i * 29, ph = 42, py = 4, vy = 52, vh = 26;
+        int32_t cx = 31 + (int32_t)i * 26;
         const rnd_step *st = &eng.steps[i];
-        int in = (int32_t)i < len, on = st->on && in, cur = (int32_t)i == s, held = (int8_t)i == ui.held;
-        uint16_t frame = held ? C_WHITE : cur ? PINK : C_LINE;
-        uint16_t c = on ? (cur ? C_WHITE : PINK) : C_DIM;
-        int32_t yp = py + 2 + (int32_t)((1.0f - st->pitch) * (float)(ph - 8));
-        int32_t vf = (int32_t)(st->vel * (float)(vh - 2));
+        int in = (int32_t)i < len, cur = (int32_t)i == s, held = (int8_t)i == ui.held;
+        char n[4];
         if (!in) {
-            cv_rect(x, py, 25, ph, C_BLACK);
-            cv_rect(x + 11, py + ph / 2, 3, 1, C_LINE);
+            disc(cx, 17, 9, RGB(30, 30, 33));
+            disc(cx, 62, 9, RGB(30, 30, 33));
+            ctext(cx, 76, &FONT_XS, "-", RGB(60, 60, 64));
             continue;
         }
-        cv_rect(x, py, 25, ph, frame);
-        cv_rect(x + 1, py + 1, 23, ph - 2, C_BLACK);
-        cv_rect(x + 2, py + ph / 2, 21, 1, C_LINE);          /* der Grundton */
-        cv_rect(x + 3, yp, 19, 4, c);
-        cv_rect(x, vy, 25, vh, frame);
-        cv_rect(x + 1, vy + 1, 23, vh - 2, C_BLACK);
-        cv_rect(x + 3, vy + vh - 1 - vf, 19, vf, on ? (cur ? C_WHITE : PINK_DIM) : C_LINE);
-        if (!on)
-            cv_line(x + 3, vy + vh - 3, x + 21, vy + 2, C_DIM);
-        if (cur)
-            cv_rect(x, vy + vh + 2, 25, 3, PINK);
+        moog_knob(cx, 17, 9, st->pitch, held, 1, 0);
+        led(cx, 40, cur && st->on);
+        if (!st->on)                     /* ein ausgeschalteter Step: die LED durchgestrichen */
+            cv_line(cx - 4, 44, cx + 4, 36, C_SUB);
+        moog_knob(cx, 62, 9, st->vel, held, 0, 0);
+        n[0] = (char)('1' + i);
+        n[1] = 0;
+        ctext(cx, 76, &FONT_XS, n, held ? C_LED : cur ? C_LABEL : C_SUB);
+    }
+    {
+        char t[16] = "CPU ";
+        int_text((int32_t)plat_cpu_pct(), t + 4);
+        text_cat(t, "%");
+        if (plat_xruns()) {
+            text_cat(t, " D");
+            int_text((int32_t)plat_xruns(), t + strlen(t));
+        }
+        cv_text(230 - text_w(&FONT_XS, t), 88, &FONT_XS, t, plat_cpu_pct() > 80u ? C_LED : RGB(70, 70, 76));
+        cv_text(10, 88, &FONT_XS, "PADS 9-16", RGB(70, 70, 76));
     }
 }
 
@@ -726,55 +799,41 @@ static void draw(void)
     uint32_t now = plat_ms();
     int32_t s = rnd_step_now(&eng);
     char t[24];
-    /* Kopf: der Name und die Kante, oder eine Meldung; Tempo und Transport */
-    cv_begin(240, 30, C_BLACK);
+    /* Kopf: der Name wie auf dem Panel, die Trigger-LED, Tempo und Transport; oder eine Meldung */
+    cv_begin(240, 30, C_PANEL);
+    wood(30, 0);
     if (now < ui.msg_until) {
-        int32_t x = cv_text(8, 6, &FONT_B, ui.msg[0], C_WHITE);
-        cv_text(x + 8, 6, &FONT_B, ui.msg[1], PINK);
+        int32_t x = cv_text(10, 6, &FONT_B, ui.msg[0], C_LABEL);
+        cv_text(x + 8, 6, &FONT_B, ui.msg[1], C_LED);
     } else {
-        float l = rnd_level(&eng);
-        int32_t x = cv_text(8, 6, &FONT_B, "RAND", PINK);
-        edge(x + 6, 8, 6 + (int32_t)(40.0f * fm_clampf(l, 0.0f, 1.0f)), 14, l > 0.05f ? PINK : PINK_DIM);
+        int32_t x = cv_text(10, 4, &FONT_B, "RAND", C_LABEL);
+        cv_rect(x + 5, 5, 1, 18, C_LABEL);
+        cv_text(x + 10, 4, &FONT_XS, "PERCUSSION", C_LABEL);
+        cv_text(x + 10, 14, &FONT_XS, "SYNTHESIZER", C_LABEL);
+        led(158, 14, rnd_level(&eng) > 0.3f);
         t[0] = 0;
         if (eng.ext) {
             text_cat(t, "EXT ");
             int_text((int32_t)(rnd_bpm(&eng) + 0.5f), t + 4);
         } else {
             int_text(set.bpm, t);
-            text_cat(t, " BPM");
         }
-        cv_text(206 - text_w(&FONT_XS, t), 10, &FONT_XS, t, eng.ext ? C_WHITE : C_AMB);
+        cv_text(214 - text_w(&FONT_XS, t), 9, &FONT_XS, t, eng.ext ? C_LED : C_LABEL);
         if (ui.playing) {
             int32_t i;
             for (i = 0; i < 6; i++)
-                cv_rect(216 + i, 9 + i, 1, 12 - 2 * i, PINK);
+                cv_rect(219 + i, 9 + i, 1, 12 - 2 * i, C_LED);
         } else {
-            cv_rect(215, 9, 10, 10, C_DIM);
+            cv_rect(218, 9, 10, 10, C_SUB);
         }
     }
-    cv_rect(0, 29, 240, 1, C_LINE);
+    cv_rect(5, 29, 230, 1, RGB(44, 44, 48));
     cv_blit(0, 0);
-    /* Mitte: die Seite */
-    cv_begin(240, 110, C_BLACK);
+    cv_begin(240, 110, C_PANEL);
     draw_middle(now);
     cv_blit(0, 30);
-    /* unten: die zwei Reihen */
-    cv_begin(240, 100, C_BLACK);
-    cv_rect(0, 0, 240, 1, C_LINE);
+    cv_begin(240, 100, C_PANEL);
     draw_steps(s);
-    t[0] = 0;
-    text_cat(t, "CPU ");
-    int_text((int32_t)plat_cpu_pct(), t + 4);
-    text_cat(t, "%");
-    {
-        int32_t x = cv_text(6, 86, &FONT_XS, t, plat_cpu_pct() > 80u ? C_WHITE : C_DIM);
-        if (plat_xruns()) {
-            char d[16] = "DROPS ";
-            int_text((int32_t)plat_xruns(), d + 6);
-            cv_text(x + 8, 86, &FONT_XS, d, C_WHITE);
-        }
-    }
-    cv_text(234 - text_w(&FONT_XS, "PADS 9-16"), 86, &FONT_XS, "PADS 9-16", C_DIM);
     cv_blit(0, 140);
 }
 
@@ -839,24 +898,26 @@ void app_panic(void)
     rnd_stop(&eng);
 }
 
-static void draw_logo(int32_t y, uint16_t c)
+void app_splash(void)                    /* das Panel: der Name, acht rote LEDs, die Holzwangen */
 {
-    cv_begin(240, 120, C_BLACK);
-    ctext(120, 30, &APP_BIG_FONT, "RAND", c);
-    edge(46, 76, 148, 10, c);
-    ctext(120, 96, &FONT_XS, "by swtdr34mz", RGB(150, 150, 158));
-    cv_blit(0, (uint32_t)y);
-}
-
-void app_splash(void)
-{
-    lcd_fill(0, 0, 240, 240, C_BLACK);
-    draw_logo(60, PINK);
+    uint32_t i;
+    lcd_fill(0, 0, 240, 240, C_PANEL);
+    lcd_fill(0, 0, 5, 240, C_WOOD);
+    lcd_fill(235, 0, 5, 240, C_WOOD);
+    cv_begin(240, 144, C_PANEL);
+    wood(144, 48);
+    ctext(120, 26, &APP_BIG_FONT, "RAND", C_LABEL);
+    cv_rect(60, 64, 120, 1, C_SUB);
+    ctext(120, 70, &FONT_XS, "PERCUSSION SYNTHESIZER", C_LABEL);
+    for (i = 0; i < 8u; i++)
+        led(50 + (int32_t)i * 20, 100, 1);
+    ctext(120, 120, &FONT_XS, "by swtdr34mz", C_SUB);
+    cv_blit(0, 48);
 }
 
 void app_ui_init(void)
 {
-    lcd_fill(0, 0, 240, 240, C_BLACK);
+    lcd_fill(0, 0, 240, 240, C_PANEL);
     ui.held = -1;
     ui.hold_clock = -1;
     ui.step_drawn = -2;

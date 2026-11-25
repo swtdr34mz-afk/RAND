@@ -83,10 +83,11 @@ typedef struct {
     rnd_voice v;
     rnd_step steps[RND_STEPS];
     int running, cur;
-    double to_next;
+    float to_next;          /* Samples bis zum nächsten Step */
     int clock_override;      /* -1: Knopf; sonst Index in RND_CLOCK_MULT (gehaltene Taste) */
     /* externe MIDI-Clock */
-    double counter, last_clock, ext_bpm;
+    uint32_t counter, last_clock;   /* Samples (last_clock: 0 = noch keine) */
+    float ext_bpm;
     int ext;                 /* 1: folgt gerade einer MIDI-Clock */
 } rnd_engine;
 

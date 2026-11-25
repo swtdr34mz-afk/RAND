@@ -8,7 +8,7 @@
 #include "plat.h"
 
 #define APP_NAME "RAND"
-#define APP_SPLASH_RGB RGB(255, 46, 136)
+#define APP_SPLASH_RGB RGB(236, 236, 240)
 #define APP_SPLASH                       /* app_splash: RANDs eigener Startbildschirm */
 #define APP_BLOCK 128u                   /* Frames pro Audioblock: 2.9 ms bei 44.1 kHz (Drums: knapp) */
 

@@ -1,6 +1,7 @@
 # RAND
 
 A raw percussion synth for the M-VAVE FM-1 by **swtdr34mz**, in the spirit of the Behringer EDGE and the Moog DFAM.
+Moog-Eurorack look on the screen: black panel, wooden cheeks, knobs with silver caps, red step LEDs.
 One voice, an 8-step sequencer with two rows, and a clock you can turn up until the rhythm becomes a tone.
 Built on [fm1-base](https://github.com/charlesvestal/fm1-base) and [felucca-bsp](https://github.com/hugelton/felucca-bsp).
 
@@ -21,18 +22,20 @@ notes play the voice.
 
 ## Pages
 
+Laid out like the EDGE's panel, left to right.
+
 | Button | Page | K1 | K2 | K3 | K4 |
 | --- | --- | --- | --- | --- | --- |
-| HOME | **VCO** | VCO 1 | VCO 2 | FM 1>2 | PITCH DECAY |
-| SEL | **MOD** | EG>1 | EG>2 | SEQ>1 | SEQ>2 |
-| ENV | **MIX** | LEVEL 1 | LEVEL 2 | NOISE | COLOR |
-| LFO | **VCF** | CUTOFF | RESO | EG>VCF | F.DECAY |
-| EDIT | **VCA** | DECAY | VEL>AMP | VEL>VCF | NOISE>VCF |
-| FX | **OUT** | DRIVE | VOLUME | LENGTH | ATTACK |
-| GLO | **SWITCH** | WAVE 1 | WAVE 2 | SYNC | FILTER LOW/HIGH |
+| HOME | **OSC 1** | FREQUENCY | ENVELOPE | SEQ PITCH | LEVEL |
+| SEL | **OSC 2** | FREQUENCY | ENVELOPE | SEQ PITCH | LEVEL |
+| ENV | **EG / FM / NOISE** | EG DECAY (both VCOs) | 1-2 FM | NOISE | COLOR |
+| LFO | **FILTER** | CUTOFF | RESONANCE | DECAY | ENVELOPE |
+| EDIT | **OUTPUT** | VCA MODE (fast / slow) | DECAY | VOLUME | DRIVE |
+| FX | **MOD** | NOISE/VCF | VEL>VCF | VEL>AMP | LENGTH |
+| GLO | **SWITCHES** | SHAPE 1 | SHAPE 2 | HARD SYNC | VCF MODE (LP / HP) |
 | SEQ | **PITCH 1-4, PITCH 5-8, VEL 1-4, VEL 5-8** | the four steps' values | | | |
 
-The same button again goes back to VCO; SEQ steps through its four pages.
+The same button again goes back to OSC 1; SEQ steps through its four pages.
 
 ## Controls
 

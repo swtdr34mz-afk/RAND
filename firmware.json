@@ -9,6 +9,7 @@
   "tags": ["drum-machine", "synth"],
   "install": "https://github.com/swtdr34mz-afk/RAND/releases",
   "source": "https://github.com/swtdr34mz-afk/RAND",
+  "screenshot": "site/img/screen-main.png",
   "hardware": {
     "models": ["FM-1"],
     "flash": ["856014", "B36014"],
