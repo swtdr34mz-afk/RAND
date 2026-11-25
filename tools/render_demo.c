@@ -22,8 +22,9 @@ static void write_wav(const char *path, const float *d, int n)
         perror(path);
         return;
     }
+    n *= 2;                              /* stereo, verschachtelt */
     fwrite("RIFF", 1, 4, f); w32(f, 36u + (uint32_t)n * 2u); fwrite("WAVEfmt ", 1, 8, f);
-    w32(f, 16); w16(f, 1); w16(f, 1); w32(f, SR); w32(f, SR * 2); w16(f, 2); w16(f, 16);
+    w32(f, 16); w16(f, 1); w16(f, 2); w32(f, SR); w32(f, SR * 4); w16(f, 4); w16(f, 16);
     fwrite("data", 1, 4, f); w32(f, (uint32_t)n * 2u);
     for (i = 0; i < n; i++) {
         float c = d[i] < -1.f ? -1.f : d[i] > 1.f ? 1.f : d[i];
@@ -35,6 +36,7 @@ static void write_wav(const char *path, const float *d, int n)
 
 static void stats(const char *name, const float *d, int n)
 {
+    n *= 2;
     double peak = 0, sum = 0;
     int i, bad = 0;
     for (i = 0; i < n; i++) {
@@ -45,15 +47,24 @@ static void stats(const char *name, const float *d, int n)
     printf("%-12s peak %5.2f  rms %6.1f dB  NaN %d\n", name, peak, 10.0 * log10(sum / n + 1e-12), bad);
 }
 
+static float REV[RND_REV_FLOATS];
+static int16_t DL[RND_DLY_FRAMES], DR[RND_DLY_FRAMES];
+
 static void run(rnd_engine *e, float *buf, int n, int ramp)
 {
-    int i;
+    int i, j;
+    float l[BLOCK], r[BLOCK];
     for (i = 0; i < n; i += BLOCK) {
+        int m = n - i < BLOCK ? n - i : BLOCK;
         if (ramp) {
             float t = (float)i / (SR * 8.f);
             rnd_set(e, RP_CLOCK, 0.2f + 0.8f * (t > 1.f ? 1.f : t));
         }
-        rnd_render(e, buf + i, n - i < BLOCK ? n - i : BLOCK);
+        rnd_render(e, l, r, m);
+        for (j = 0; j < m; j++) {
+            buf[2 * (i + j)] = l[j];
+            buf[2 * (i + j) + 1] = r[j];
+        }
     }
 }
 
@@ -62,12 +73,13 @@ int main(int argc, char **argv)
     const char *dir = argc > 1 ? argv[1] : ".";
     static rnd_engine e;
     int p, len = SR * 6, all_n = 0;
-    float *buf = malloc(sizeof(float) * SR * 10), *all = malloc(sizeof(float) * SR * 60);
+    float *buf = malloc(sizeof(float) * SR * 20), *all = malloc(sizeof(float) * SR * 120);
     char fn[512];
     for (p = 0; p < RND_NPRESETS; p++) {
         char nm[32];
         int k;
         rnd_init(&e, SR);
+        rnd_fx_memory(&e, REV, DL, DR);
         rnd_preset_load(&e, p);
         rnd_start(&e);
         run(&e, buf, len, 0);
@@ -76,10 +88,11 @@ int main(int argc, char **argv)
         for (k = 0; nm[k]; k++) if (nm[k] == ' ') nm[k] = '_';
         snprintf(fn, sizeof fn, "%s/%d_%s.wav", dir, p + 1, nm);
         write_wav(fn, buf, len);
-        memcpy(all + all_n, buf, sizeof(float) * SR * 4); all_n += SR * 4;
-        memset(all + all_n, 0, sizeof(float) * SR / 4); all_n += SR / 4;
+        memcpy(all + 2 * all_n, buf, sizeof(float) * SR * 8); all_n += SR * 4;
+        memset(all + 2 * all_n, 0, sizeof(float) * SR / 2); all_n += SR / 4;
     }
     rnd_init(&e, SR);
+    rnd_fx_memory(&e, REV, DL, DR);
     rnd_preset_load(&e, 0);
     rnd_set(&e, RP_VCA_DECAY, 0.3f);
     rnd_start(&e);
@@ -87,7 +100,7 @@ int main(int argc, char **argv)
     stats("CLOCK RAMP", buf, SR * 10);
     snprintf(fn, sizeof fn, "%s/9_CLOCK_RAMP.wav", dir);
     write_wav(fn, buf, SR * 10);
-    memcpy(all + all_n, buf, sizeof(float) * SR * 10); all_n += SR * 10;
+    memcpy(all + 2 * all_n, buf, sizeof(float) * SR * 20); all_n += SR * 10;
     snprintf(fn, sizeof fn, "%s/RAND_demo_all.wav", dir);
     write_wav(fn, all, all_n);
     return 0;

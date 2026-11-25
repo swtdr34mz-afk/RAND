@@ -5,49 +5,65 @@ Moog-Eurorack look on the screen: black panel, wooden cheeks, knobs with silver 
 One voice, an 8-step sequencer with two rows, and a clock you can turn up until the rhythm becomes a tone.
 Built on [fm1-base](https://github.com/charlesvestal/fm1-base) and [felucca-bsp](https://github.com/hugelton/felucca-bsp).
 
-![RAND](site/img/screen-main.png) ![CLOCK](site/img/screen-clock.png) ![Rows](site/img/screen-rows.png)
+![RAND](site/img/screen-main.png) ![The sequencer](site/img/screen-rows.png) ![The patchbay](site/img/screen-patch.png)
 
 ## The voice
 
 Two oscillators (triangle or pulse, 8 Hz to 8 kHz without octave switches), FM from VCO 1 to VCO 2, hard sync,
-white-to-pink noise, a 24 dB ladder filter (low or high pass) with resonance, a pitch, a filter and an amp envelope,
-velocity to amp and filter, drive.
+white or pink noise, a 24 dB ladder filter (low or high pass) with resonance, a pitch, a filter and an amp envelope,
+velocity to amp and filter, drive; then a ping-pong delay in tempo, a reverb and a master filter.
 
 ## The sequencer
 
-Eight steps, each with a **pitch** and a **velocity** and on or off; length 1 to 8. The **CLOCK** runs from /4 to x128
-of the tempo's sixteenths: from x32 on the steps come so fast that you hear them as a tone, and the two rows shape
-its waveform. RAND follows **MIDI clock and START / STOP / CONTINUE** over USB (for example from SIX MACHINES); MIDI
-notes play the voice.
+Eight steps, each with a **pitch** and a **velocity** knob, length 1 to 8. The **CLOCK** runs from /4 to x128 of the
+tempo's sixteenths: from x32 on the steps come so fast that you hear them as a tone, and the two rows shape its
+waveform. RAND follows **MIDI clock and START / STOP / CONTINUE** over USB (for example from SIX MACHINES); MIDI notes
+play the voice.
 
 ## Pages
 
-Laid out like the EDGE's panel, left to right.
+Laid out like the EDGE's panel.
 
 | Button | Page | K1 | K2 | K3 | K4 |
 | --- | --- | --- | --- | --- | --- |
-| HOME | **OSC 1** | FREQUENCY | ENVELOPE | SEQ PITCH | LEVEL |
-| SEL | **OSC 2** | FREQUENCY | ENVELOPE | SEQ PITCH | LEVEL |
-| ENV | **EG / FM / NOISE** | EG DECAY (both VCOs) | 1-2 FM | NOISE | COLOR |
-| LFO | **FILTER** | CUTOFF | RESONANCE | DECAY | ENVELOPE |
-| EDIT | **OUTPUT** | VCA MODE (fast / slow) | DECAY | VOLUME | DRIVE |
-| FX | **MOD** | NOISE/VCF | VEL>VCF | VEL>AMP | LENGTH |
-| GLO | **SWITCHES** | SHAPE 1 | SHAPE 2 | HARD SYNC | VCF MODE (LP / HP) |
-| SEQ | **PITCH 1-4, PITCH 5-8, VEL 1-4, VEL 5-8** | the four steps' values | | | |
+| HOME | **OSC 1** (HOME again: **OSC 2**) | FREQUENCY | ENVELOPE | SEQ PITCH | LEVEL |
+| SEL | **FM / NOISE** | 1-2 FM | NOISE | NOISE/VCF | VEL>VCF |
+| ENV | **ENVELOPES** | VCO DECAY (both VCOs) | VCF DECAY | VCA DECAY | VCA MODE (fast / slow) |
+| LFO | **FILTER** | CUTOFF | RESONANCE | ENVELOPE | VCF MODE (LP / HP) |
+| EDIT | **OUTPUT** | VEL>AMP | VOLUME | LENGTH | DELAY TIME (1/32 .. 3/8) |
+| FX | **FX** | REVERB | DELAY (ping-pong, in tempo) | DRIVE | MASTER FILTER (LP <- off -> HP) |
+| GLO | **SWITCHES** | SHAPE 1 | SHAPE 2 | HARD SYNC | NOISE COLOR (white / pink) |
+| SEQ | **PITCH 1-4, PITCH 5-8, VEL 1-4, VEL 5-8** | one knob per step, as on the DFAM | | | |
 
-The same button again goes back to OSC 1; SEQ steps through its four pages.
+The steps under the knobs get a white ring. A velocity of 0 silences a step.
+
+## The patchbay on the keys
+
+The keys are the patch points: the **11 black keys are outputs**, the **16 white keys are inputs**. Hold a black key
+and tap a white one: a cable (tap again: pulled). While a black key is held, K1 sets how strongly its cables pull
+(minus to plus) and REC pulls all of them. A white key alone shows what goes into it. Up to 8 cables; they are saved
+with the sound, and the presets bring some.
+
+| Black key (OUT) | | White key (IN) | |
+| --- | --- | --- | --- |
+| 1 VCO 1 | 7 VELOCITY | 1 VCO 1 FREQ | 9 VCA (audio in: ring mod) |
+| 2 VCO 2 | 8 PITCH ROW | 2 VCO 2 FREQ | 10 DRIVE |
+| 3 NOISE | 9 LFO (one bar) | 3 1-2 FM | 11 DECAY |
+| 4 PITCH EG | 10 RANDOM (new each hit) | 4 VCO 1 LEVEL | 12 TEMPO |
+| 5 VCF EG | 11 TRIGGER (a short pulse) | 5 VCO 2 LEVEL | 13 DELAY |
+| 6 VCA EG | | 6 NOISE LEVEL | 14 REVERB |
+| | | 7 CUTOFF | 15 MASTER FILTER |
+| | | 8 RESONANCE | 16 CRUSH (bits and rate) |
 
 ## Controls
 
 | Control | What it does |
 | --- | --- |
-| White keys 1-8 | The steps: a tap turns a step on or off; held, K1 its pitch, K2 its velocity |
-| White keys 9-16 | Pads: play steps 1-8 by hand |
-| Black keys 1-5, held | The clock jumps to x2, x4, x8, x32, x128 at once; let go, it comes back |
 | SELECT | Tempo (40 to 280 BPM) |
-| ALGORITHM | CLOCK: /4, /2, x1 ... x128 |
-| PRESET | The eight presets (sound and pattern) |
+| ALGORITHM | CLOCK: /4, /2, x1 ... x128 (from x32 on the rhythm becomes a tone) |
+| PRESET | The eight presets (sound, pattern, cables) |
 | OCT- / OCT+ | Length |
+| SAVE | TRIGGER: one hit |
 | ARP | RAND: new random pitch and velocity rows |
 | PLAY | Start / stop |
 | REC held 1 s | The preset back as it was |

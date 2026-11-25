@@ -1,19 +1,18 @@
 /* SPDX-License-Identifier: MPL-2.0
  * Copyright (C) 2026 swtdr34mz (RAND) */
-/* RAND: Bedienung, Seiten, Sequencer-Tasten, Bildschirm, Einstellungen. Teil des Unity-Builds (device/unity.c,
+/* RAND: Bedienung, Seiten, Patchbay, Bildschirm, Einstellungen. Teil des Unity-Builds (device/unity.c,
  * host/plat_host.c), nach der Plattform: gfx.c und announce.c sind sichtbar. Der Klang ist dsp/rand_core.c.
  *
  * Bedienung
- *   weiße Tasten 1-8    die 8 Steps: Tippen = an/aus; gehalten: K1 Tonhöhe, K2 Lautstärke dieses Steps
- *   weiße Tasten 9-16   Pads: spielen Step 1-8 von Hand
- *   schwarze Tasten 1-5 gehalten: Takt sofort x2, x4, x8, x32, x128 (der EDGE-Trick), losgelassen zurück
- *   K1..K4              die vier Regler der Seite
- *   HOME OSC 1, SEL OSC 2, ENV EG/FM/NOISE, LFO FILTER, EDIT OUTPUT, FX MOD, GLO SWITCHES   die Klang-Seiten wie
- *                       die Felder am EDGE (nochmal: zurück zu OSC 1)
- *   SEQ                 die Reihen: PITCH 1-4, PITCH 5-8, VEL 1-4, VEL 5-8 (K1..K4 = vier Steps)
- *   SELECT              Tempo        ALGORITHM   CLOCK: /4 .. x128        PRESET   die Presets
- *   OCT- / OCT+         Länge 1..8   ARP         RAND: neue Zufalls-Reihen   PLAY   Start / Stop
- *   REC 1 s halten      das Preset ganz zurück (Klang und Pattern)
+ *   K1..K4              die vier Regler der Seite. Der Sequencer wie am DFAM: SEQ, und K1..K4 sind vier Steps
+ *   HOME   OSC 1 / OSC 2 (nochmal drücken)     SEL   FM / NOISE        ENV   die Hüllkurven (VCO, VCF, VCA)
+ *   LFO    FILTER       EDIT   OUTPUT       FX   REVERB, DELAY, DRIVE, MASTER FILTER       GLO   die Kippschalter
+ *   SEQ    PITCH 1-4, PITCH 5-8, VEL 1-4, VEL 5-8 (Velocity 0: der Step schweigt)
+ *   Tasten = die PATCHBAY: schwarze Tasten sind Ausgänge (OUT), weiße Eingänge (IN). Eine schwarze halten und eine
+ *            weiße tippen: ein Kabel gesteckt (nochmal: gezogen). Gehalten: K1 die Stärke ihrer Kabel, REC: alle weg
+ *   SELECT Tempo     ALGORITHM   CLOCK /4 .. x128     PRESET   die Presets     OCT- / OCT+   Länge 1..8
+ *   PLAY   Start / Stop     SAVE   TRIGGER (ein Schlag)     ARP   RAND: neue Zufalls-Reihen
+ *   REC 1 s halten      das Preset ganz zurück (Klang, Pattern, Kabel)
  *   MIDI über USB: Clock, START/STOP/CONTINUE (RAND folgt z.B. SIX MACHINES), Noten spielen die Stimme.
  *   Einstellungen speichern sich selbst, sobald der Sequencer steht. */
 #include "fastmath.h"
@@ -24,13 +23,14 @@
 static rnd_engine eng;
 
 /* ------------------------------------------------------------- Einstellungen --- */
-#define SET_MAGIC 0x31444E52u            /* "RND1" */
+#define SET_MAGIC 0x32444E52u            /* "RND2" */
 typedef struct {
     uint32_t magic;
     uint8_t v[RP_COUNT];                 /* die Regler 0..127 (TEMPO steht in bpm) */
     uint8_t pitch[RND_STEPS], vel[RND_STEPS];
-    uint8_t gates, preset;
+    uint8_t preset, ncab;
     uint16_t bpm;
+    uint8_t cab_src[RND_NCABLES], cab_dst[RND_NCABLES], cab_amt[RND_NCABLES];   /* amt 0..127, 64 = 0 */
 } settings_t;
 _Static_assert(sizeof(settings_t) <= PLAT_STORE_MAX, "die Einstellungen passen nicht in ein Speicherobjekt");
 static settings_t set;
@@ -38,7 +38,6 @@ static uint8_t set_dirty;
 static uint32_t dirty_at;
 
 static const uint8_t WK[16] = PLAT_WHITE_KEYS, BK[11] = PLAT_BLACK_KEYS;
-static const uint8_t HOLD_CLOCK[5] = {3, 5, 6, 8, 10};   /* x2 x4 x8 x32 x128 */
 
 static uint8_t to127(float x) { return (uint8_t)clamp((int32_t)(x * 127.0f + 0.5f), 0, 127); }
 
@@ -52,7 +51,23 @@ static void engine_from_settings(void)
     for (i = 0; i < RND_STEPS; i++) {
         eng.steps[i].pitch = (float)set.pitch[i] / 127.0f;
         eng.steps[i].vel = (float)set.vel[i] / 127.0f;
-        eng.steps[i].on = (uint8_t)(set.gates >> i & 1u);
+        eng.steps[i].on = 1;
+    }
+    rnd_patch_clear(&eng, -1);
+    for (i = 0; i < set.ncab; i++) {
+        rnd_patch_toggle(&eng, set.cab_src[i], set.cab_dst[i]);
+        eng.v.cab[eng.v.ncab - 1].amt = ((float)set.cab_amt[i] - 64.0f) / 63.0f;
+    }
+}
+
+static void cables_from_engine(void)
+{
+    int i;
+    set.ncab = (uint8_t)eng.v.ncab;
+    for (i = 0; i < eng.v.ncab; i++) {
+        set.cab_src[i] = eng.v.cab[i].src;
+        set.cab_dst[i] = eng.v.cab[i].dst;
+        set.cab_amt[i] = (uint8_t)clamp((int32_t)(64.0f + eng.v.cab[i].amt * 63.0f + 0.5f), 1, 127);
     }
 }
 
@@ -62,12 +77,11 @@ static void settings_from_engine(void)
     for (i = 0; i < RP_COUNT; i++)
         set.v[i] = to127(rnd_get(&eng, (int)i));
     set.bpm = (uint16_t)clamp((int32_t)(40.0f + rnd_get(&eng, RP_TEMPO) * 240.0f + 0.5f), 40, 280);
-    set.gates = 0;
     for (i = 0; i < RND_STEPS; i++) {
         set.pitch[i] = to127(eng.steps[i].pitch);
         set.vel[i] = to127(eng.steps[i].vel);
-        set.gates |= (uint8_t)((eng.steps[i].on ? 1u : 0u) << i);
     }
+    cables_from_engine();
 }
 
 static void settings_defaults(void)
@@ -87,6 +101,11 @@ static int settings_ok(void)
             return 0;
     for (i = 0; i < RND_STEPS; i++)
         if (set.pitch[i] > 127u || set.vel[i] > 127u)
+            return 0;
+    if (set.ncab > RND_NCABLES)
+        return 0;
+    for (i = 0; i < set.ncab; i++)
+        if (set.cab_src[i] >= RND_NSRC || set.cab_dst[i] >= RND_NDST || set.cab_amt[i] > 127u)
             return 0;
     return set.magic == SET_MAGIC && set.bpm >= 40u && set.bpm <= 280u && set.preset < RND_NPRESETS;
 }
@@ -123,19 +142,20 @@ static void hit(float pitch, float vel)
 }
 
 /* ------------------------------------------------------------------- Seiten --- */
-enum { PG_VCO, PG_OSC2, PG_EGN, PG_VCF, PG_OUT, PG_MOD2, PG_SW, PG_PA, PG_PB, PG_VA, PG_VB, NPAGES };
-#define NSOUND PG_PA
-static const char *const PAGE_NAME[NPAGES] = {"OSC 1", "OSC 2", "EG / FM / NOISE", "FILTER", "OUTPUT", "MOD",
+enum { PG_OSC1, PG_OSC2, PG_NOISE, PG_ENV, PG_FILTER, PG_OUT, PG_FX, PG_SW, PG_P1, PG_P2, PG_V1, PG_V2, NPAGES };
+#define NSOUND PG_P1
+static const char *const PAGE_NAME[NPAGES] = {"OSC 1", "OSC 2", "FM / NOISE", "ENVELOPES", "FILTER", "OUTPUT", "FX",
                                               "SWITCHES", "PITCH 1-4", "PITCH 5-8", "VEL 1-4", "VEL 5-8"};
-/* die Seiten wie die Felder am EDGE-Panel, von links nach rechts */
+/* die Seiten nach den Feldern am EDGE-Panel */
 static const uint8_t PAGE_P[NSOUND][4] = {
-    {RP_VCO1_FREQ, RP_VCO1_EG, RP_VCO1_SEQ, RP_VCO1_LVL},        /* OSCILLATOR (VCO 1) */
-    {RP_VCO2_FREQ, RP_VCO2_EG, RP_VCO2_SEQ, RP_VCO2_LVL},        /* OSCILLATOR (VCO 2) */
-    {RP_PITCH_DECAY, RP_FM, RP_NOISE_LVL, RP_NOISE_COLOR},       /* EG (VCO 1&2), 1-2 FM AMT, NOISE */
-    {RP_CUTOFF, RP_RESO, RP_VCF_DECAY, RP_VCF_EG},               /* FILTER (VCF) */
-    {RP_VCA_ATTACK, RP_VCA_DECAY, RP_VOLUME, RP_DRIVE},          /* OUTPUT (VCA), dazu DRIVE */
-    {RP_NOISE_VCF, RP_VEL_VCF, RP_VEL_VCA, RP_LENGTH},           /* MOD: was der EDGE über Kabel macht */
-    {RP_VCO1_WAVE, RP_VCO2_WAVE, RP_SYNC, RP_FILTER_MODE},       /* die Kippschalter */
+    {RP_VCO1_FREQ, RP_VCO1_EG, RP_VCO1_SEQ, RP_VCO1_LVL},        /* HOME: OSCILLATOR (VCO 1) */
+    {RP_VCO2_FREQ, RP_VCO2_EG, RP_VCO2_SEQ, RP_VCO2_LVL},        /* HOME nochmal: OSCILLATOR (VCO 2) */
+    {RP_FM, RP_NOISE_LVL, RP_NOISE_VCF, RP_VEL_VCF},             /* SEL: 1-2 FM AMT, NOISE */
+    {RP_PITCH_DECAY, RP_VCF_DECAY, RP_VCA_DECAY, RP_VCA_ATTACK}, /* ENV: EG (VCO 1&2), VCF, VCA, VCA MODE */
+    {RP_CUTOFF, RP_RESO, RP_VCF_EG, RP_FILTER_MODE},             /* LFO: FILTER (VCF) */
+    {RP_VEL_VCA, RP_VOLUME, RP_LENGTH, RP_DELAY_TIME},           /* EDIT: OUTPUT (VCA) */
+    {RP_REVERB, RP_DELAY, RP_DRIVE, RP_MFILTER},                 /* FX */
+    {RP_VCO1_WAVE, RP_VCO2_WAVE, RP_SYNC, RP_NOISE_COLOR},       /* GLO: die Kippschalter */
 };
 
 static struct {
@@ -147,11 +167,10 @@ static struct {
     uint32_t keys, btn;
     uint32_t enc_at[NE];
     uint8_t page;
-    int8_t held;                         /* der gehaltene Step (-1: keiner) */
-    uint8_t held_edit;
-    uint32_t held_at;
-    uint32_t pads;
-    int8_t hold_clock;                   /* die gehaltene schwarze Taste (-1: keine) */
+    int8_t src;                          /* die gehaltene schwarze Taste: ein Ausgang (-1: keiner) */
+    uint8_t src_used;                    /* mit ihr gesteckt oder gedreht */
+    int8_t in_show;                      /* eine weiße Taste allein: was in diesen Eingang geht */
+    uint32_t in_until;
     uint32_t rec_t;
     uint8_t playing;
     int32_t step_drawn;
@@ -159,6 +178,14 @@ static struct {
     uint8_t redraw;
     uint32_t load_at, load_shown;
 } ui;
+
+static uint32_t str_len(const char *s)    /* (kein strlen auf dem FM-1) */
+{
+    uint32_t n = 0;
+    while (s[n])
+        n++;
+    return n;
+}
 
 static void text_cat(char *d, const char *s)
 {
@@ -237,7 +264,7 @@ static void hz_text(float hz, char *t)
         int32_t d = (int32_t)(hz / 100.0f + 0.5f);
         int_text(d / 10, t);
         text_cat(t, ".");
-        int_text(d % 10, t + strlen(t));
+        int_text(d % 10, t + str_len(t));
         text_cat(t, "K");
     }
 }
@@ -253,7 +280,7 @@ static void val_text(int id, uint8_t v, char *t)
         int32_t b = (int32_t)v - 64;
         if (b > 0)
             text_cat(t, "+");
-        int_text(b, t + strlen(t));
+        int_text(b, t + str_len(t));
         return;
     }
     switch (id) {
@@ -271,7 +298,7 @@ static void val_text(int id, uint8_t v, char *t)
             int32_t d = (int32_t)(ms / 100.0f + 0.5f);
             int_text(d / 10, t);
             text_cat(t, ".");
-            int_text(d % 10, t + strlen(t));
+            int_text(d % 10, t + str_len(t));
             text_cat(t, "S");
         }
         return;
@@ -282,27 +309,27 @@ static void val_text(int id, uint8_t v, char *t)
 }
 
 /* die Regler der Seite: ein Klang-Parameter, oder (SEQ-Seiten, gehaltener Step) Tonhöhe / Lautstärke eines Steps */
-typedef struct { int id; int step; int vel; } knob_t;   /* id >= 0: Parameter; sonst step + vel */
+/* die Regler der Seite: ein Klang-Parameter, ein Step (SEQ-Seiten), oder die Stärke der Kabel (Ausgang gehalten) */
+typedef struct { int id; int step; int vel; int amt; } knob_t;
 static knob_t knob_of(int k)
 {
-    knob_t kb = {-1, -1, 0};
-    if (ui.held >= 0) {
-        if (k < 2) {
-            kb.step = ui.held;
-            kb.vel = k == 1;
-        }
+    knob_t kb = {-1, -1, 0, 0};
+    if (ui.src >= 0) {
+        kb.amt = k == 0;
         return kb;
     }
     if (ui.page < NSOUND) {
         kb.id = PAGE_P[ui.page][k];
         return kb;
     }
-    kb.step = (ui.page == PG_PB || ui.page == PG_VB ? 4 : 0) + k;
-    kb.vel = ui.page >= PG_VA;
+    kb.step = (ui.page == PG_P2 || ui.page == PG_V2 ? 4 : 0) + k;   /* wie am DFAM: ein Regler pro Step */
+    kb.vel = ui.page >= PG_V1;
     return kb;
 }
 static int knob_get(knob_t kb)
 {
+    if (kb.amt)
+        return clamp((int32_t)(64.0f + rnd_patch_get_amount(&eng, ui.src) * 63.0f + 0.5f), 1, 127);
     if (kb.id >= 0)
         return set.v[kb.id];
     if (kb.step >= 0)
@@ -331,13 +358,18 @@ static void knob(int k, int32_t e)
     ui.redraw = 1;
     if (kb.id >= 0 && RND_PARAMS[kb.id].kind == RK_SWITCH)
         v = e > 0 ? 127 : 0;
-    else if (kb.id == RP_LENGTH)                             /* Länge: ein Step pro Rast */
-        v = (clamp(1 + (was * 7 + 63) / 127 + (e > 0 ? 1 : -1), 1, 8) - 1) * 127 / 7;
-    else
-        v = clamp(was + accel(EN_K1 + k, e, 3, 6), 0, 127);
+    else if (kb.id == RP_LENGTH || kb.id == RP_DELAY_TIME) {   /* Rasterwerte: ein Schritt pro Rast */
+        int32_t n = kb.id == RP_LENGTH ? 7 : RND_NDIV - 1, st = (was * n + 63) / 127;
+        v = (clamp(st + (e > 0 ? 1 : -1), 0, n) * 127 + n / 2) / n;
+    } else
+        v = clamp(was + accel(EN_K1 + k, e, 3, 6), kb.amt ? 1 : 0, 127);
     if (v == was)
         return;
-    if (kb.id >= 0) {
+    if (kb.amt) {
+        rnd_patch_amount(&eng, ui.src, ((float)v - 64.0f) / 63.0f);
+        cables_from_engine();
+        ui.src_used = 1;
+    } else if (kb.id >= 0) {
         set.v[kb.id] = (uint8_t)v;
         rnd_set(&eng, kb.id, (float)v / 127.0f);
     } else if (kb.vel) {
@@ -347,8 +379,6 @@ static void knob(int k, int32_t e)
         set.pitch[kb.step] = (uint8_t)v;
         eng.steps[kb.step].pitch = (float)v / 127.0f;
     }
-    if (ui.held >= 0)
-        ui.held_edit = 1;
     dirty();
 }
 
@@ -378,28 +408,20 @@ static void preset_apply(uint32_t p)
     dirty();
 }
 
-static void clock_text(int idx, char *t)
-{
-    t[0] = 0;
-    text_cat(t, RND_CLOCK_NAME[idx]);
-}
-
 static void clock_turn(int32_t e)
 {
     int idx = clamp(rnd_clock_index(&eng) + (e > 0 ? 1 : -1), 0, RND_NCLOCK - 1);
-    char t[8];
     set.v[RP_CLOCK] = (uint8_t)((idx * 127 + 5) / 10);
     rnd_set(&eng, RP_CLOCK, (float)set.v[RP_CLOCK] / 127.0f);
     dirty();
-    clock_text(idx, t);
-    say_big(t, idx >= 8 ? "AUDIO RATE" : "CLOCK");
+    say_big(RND_CLOCK_NAME[idx], idx >= 8 ? "AUDIO RATE" : "CLOCK");
 }
 
 static void length_step(int d)
 {
     int32_t l = clamp(rnd_length(&eng) + d, 1, RND_STEPS);
     char t[12] = "";
-    set.v[RP_LENGTH] = (uint8_t)((l - 1) * 127 / 7);
+    set.v[RP_LENGTH] = (uint8_t)(((l - 1) * 127 + 3) / 7);
     rnd_set(&eng, RP_LENGTH, (float)set.v[RP_LENGTH] / 127.0f);
     dirty();
     int_text(l, t);
@@ -407,42 +429,64 @@ static void length_step(int d)
     app_say("LENGTH", t);
 }
 
-/* ------------------------------------------------------------------ Eingabe --- */
-static void step_down(int i)
+/* ---------------------------------------------------------------- Patchbay --- */
+static void patch_key(int dst)           /* eine weiße Taste, während ein Ausgang gehalten wird */
 {
-    ui.held = (int8_t)i;
-    ui.held_edit = 0;
-    ui.held_at = plat_ms();
-    if (!ui.playing)                     /* gestoppt: hören, was der Step spielt */
-        hit(eng.steps[i].pitch, eng.steps[i].vel);
-    ui.redraw = 1;
-}
-
-static void step_up(void)                /* kurz getippt: an / aus */
-{
-    int i = ui.held;
-    if (!ui.held_edit && plat_ms() - ui.held_at < 500u) {
-        eng.steps[i].on = (uint8_t)!eng.steps[i].on;
-        set.gates ^= (uint8_t)(1u << i);
-        dirty();
+    int r = rnd_patch_toggle(&eng, ui.src, dst);
+    ui.src_used = 1;
+    if (r < 0) {
+        app_say("PATCH FULL", "8 CABLES");
+        return;
     }
-    ui.held = -1;
-    ui.redraw = 1;
+    cables_from_engine();
+    dirty();
+    app_say(r ? "PATCHED" : "PULLED", RND_DST_NAME[dst]);
 }
 
+static int cables_into(int dst)
+{
+    int i, n = 0;
+    for (i = 0; i < eng.v.ncab; i++)
+        n += eng.v.cab[i].dst == dst;
+    return n;
+}
+static int cables_from(int src)
+{
+    int i, n = 0;
+    for (i = 0; i < eng.v.ncab; i++)
+        n += eng.v.cab[i].src == src;
+    return n;
+}
+
+/* ------------------------------------------------------------------ Eingabe --- */
 static void button(uint32_t i)
 {
-    static const int8_t PAGE_OF[NB] = {PG_MOD2, PG_OSC2, PG_EGN, PG_VCF, PG_OUT, PG_SW, PG_VCO, -1, -1, -1, -1, -1,
-                                       -1, -1};
+    static const int8_t PAGE_OF[NB] = {PG_FX, PG_NOISE, PG_ENV, PG_FILTER, PG_OUT, PG_SW, PG_OSC1, -1, -1, -1, -1,
+                                       -1, -1, -1};
     if (PAGE_OF[i] >= 0) {
         int pg = PAGE_OF[i];
-        page_set(ui.page == pg && pg != PG_VCO ? PG_VCO : pg);
+        if (i == B_HOME)                 /* HOME: OSC 1, nochmal OSC 2 */
+            pg = ui.page == PG_OSC1 ? PG_OSC2 : PG_OSC1;
+        else if (ui.page == pg)
+            pg = PG_OSC1;
+        page_set(pg);
         return;
     }
     switch (i) {
-    case B_SEQ: page_set(ui.page >= PG_PA && ui.page < PG_VB ? ui.page + 1 : PG_PA); break;
+    case B_SEQ: page_set(ui.page >= PG_P1 && ui.page < PG_V2 ? ui.page + 1 : PG_P1); break;
     case B_PLAY: play_toggle(); break;
-    case B_REC: ui.rec_t = plat_ms(); break;
+    case B_REC:
+        if (ui.src >= 0) {               /* ein Ausgang gehalten: seine Kabel weg */
+            rnd_patch_clear(&eng, ui.src);
+            cables_from_engine();
+            ui.src_used = 1;
+            dirty();
+            app_say("PULLED", RND_SRC_NAME[(int)ui.src]);
+        } else {
+            ui.rec_t = plat_ms();
+        }
+        break;
+    case B_SAVE: hit(eng.steps[0].pitch, 1.0f); break;   /* TRIGGER */
     case B_ARP:
         rnd_randomize(&eng, plat_ms() * 2654435761u ^ eng.counter);
         settings_from_engine();
@@ -472,33 +516,35 @@ static void input(void)
 {
     uint32_t keys = plat_keys(), btn = plat_buttons(), i;
     int32_t e;
-    int hc = -1;
-    for (i = 0; i < 8u; i++) {           /* die Steps */
-        uint32_t bit = 1u << WK[i];
-        if ((keys & bit) && !(ui.keys & bit) && ui.held < 0)
-            step_down((int)i);
-        else if (!(keys & bit) && (ui.keys & bit) && ui.held == (int8_t)i)
-            step_up();
+    int src = ui.src;
+    /* die Ausgänge: eine schwarze Taste gedrückt hält sie (die erste gilt) */
+    if (src >= 0 && !(keys >> BK[src] & 1u)) {
+        if (!ui.src_used)
+            app_say(RND_SRC_NAME[src], cables_from(src) ? "OUT" : "NOT PATCHED");
+        src = -1;
     }
-    for (i = 8; i < 16u; i++) {          /* die Pads: Step 1-8 von Hand */
+    if (src < 0)
+        for (i = 0; i < 11u; i++)
+            if ((keys >> BK[i] & 1u) && !(ui.keys >> BK[i] & 1u)) {
+                src = (int)i;
+                ui.src_used = 0;
+                break;
+            }
+    if (src != ui.src) {
+        ui.src = (int8_t)src;
+        ui.redraw = 1;
+    }
+    for (i = 0; i < 16u; i++) {          /* die Eingänge */
         uint32_t bit = 1u << WK[i];
         if ((keys & bit) && !(ui.keys & bit)) {
-            const rnd_step *s = &eng.steps[i - 8u];
-            hit(s->pitch, s->vel > 0.3f ? s->vel : 0.3f);
+            if (ui.src >= 0) {
+                patch_key((int)i);
+            } else {
+                ui.in_show = (int8_t)i;
+                ui.in_until = plat_ms() + 1500u;
+                ui.redraw = 1;
+            }
         }
-    }
-    for (i = 0; i < 5u; i++)             /* gehaltene schwarze Taste: der Takt sofort schneller */
-        if (keys >> BK[i] & 1u)
-            hc = (int)i;
-    if (hc != ui.hold_clock) {
-        ui.hold_clock = (int8_t)hc;
-        rnd_clock_override(&eng, hc >= 0 ? HOLD_CLOCK[hc] : -1);
-        if (hc >= 0) {
-            char t[8];
-            clock_text(HOLD_CLOCK[hc], t);
-            say_big(t, HOLD_CLOCK[hc] >= 8 ? "AUDIO RATE" : "HOLD");
-        }
-        ui.redraw = 1;
     }
     for (i = 0; i < NB; i++)
         if ((btn >> i & 1u) && !(ui.btn >> i & 1u))
@@ -530,30 +576,29 @@ static void input(void)
 
 void app_input_only(void) { input(); }
 
+/* die LEDs: ein gehaltener Ausgang hell, seine Eingänge hell; sonst gesteckte Buchsen halb, die anderen glimmen */
 static void lights(void)
 {
     uint32_t lit = 0, mid = 0, dim = 0, btn = 0, dimb, i;
-    int32_t s = rnd_step_now(&eng);
-    static const uint8_t PAGE_BTN[NSOUND] = {B_HOME, B_SEL, B_ENV, B_LFO, B_EDIT, B_FX, B_GLO};
-    for (i = 0; i < 8u; i++) {           /* Steps: an = halb, der laufende hell (oder aus, wenn er spielt) */
-        uint32_t bit = 1u << WK[i];
-        if (eng.steps[i].on)
-            mid |= bit;
-        if ((int32_t)i == s || (int8_t)i == ui.held)
+    static const uint8_t PAGE_BTN[NSOUND] = {B_HOME, B_HOME, B_SEL, B_ENV, B_LFO, B_EDIT, B_FX, B_GLO};
+    for (i = 0; i < 11u; i++) {
+        uint32_t bit = 1u << BK[i];
+        if ((int8_t)i == ui.src)
             lit |= bit;
-        if ((int32_t)i >= rnd_length(&eng))
-            mid &= ~bit;
+        else if (cables_from((int)i))
+            mid |= bit;
+        else
+            dim |= bit;
     }
-    for (i = 8; i < 16u; i++)            /* Pads */
-        if (ui.keys >> WK[i] & 1u)
-            lit |= 1u << WK[i];
+    for (i = 0; i < 16u; i++) {
+        uint32_t bit = 1u << WK[i];
+        if (ui.src >= 0 ? rnd_patch_has(&eng, ui.src, (int)i) : (ui.keys & bit) != 0)
+            lit |= bit;
+        else if (ui.src < 0 && cables_into((int)i))
+            mid |= bit;
         else
-            dim |= 1u << WK[i];
-    for (i = 0; i < 5u; i++)             /* die Takt-Tasten */
-        if ((int8_t)i == ui.hold_clock)
-            lit |= 1u << BK[i];
-        else
-            dim |= 1u << BK[i];
+            dim |= bit;
+    }
     if (ui.playing)
         btn |= LED_PLAY_GREEN;
     if (ui.page < NSOUND)
@@ -562,7 +607,7 @@ static void lights(void)
         btn |= 1u << B_SEQ;
     dimb = (1u << B_PLAY) | (1u << B_REC) | (1u << B_SEQ) | (1u << B_ARP) | (1u << B_FX) | (1u << B_SEL)
            | (1u << B_ENV) | (1u << B_LFO) | (1u << B_EDIT) | (1u << B_GLO) | (1u << B_HOME) | (1u << B_OCTDN)
-           | (1u << B_OCTUP);
+           | (1u << B_OCTUP) | (1u << B_SAVE);
     plat_lights(btn | (ui.btn & ~(1u << B_PLAY)), lit, dimb, dim, 1);
     plat_lights_mid(0, mid & ~lit);
 }
@@ -677,18 +722,18 @@ static void draw_knob(int k, int32_t cx, int32_t y, uint32_t now)
             return;
         }
     } else {
-        if (ui.held >= 0) {
-            text_cat(name, kb.vel ? "VELOCITY" : "PITCH");
+        if (kb.amt) {
+            text_cat(name, "AMOUNT");
         } else {
             text_cat(name, "STEP ");
             int_text(kb.step + 1, name + 5);
         }
-        bipolar = !kb.vel;
+        bipolar = !kb.vel || kb.amt;
         t[0] = 0;
         if (bipolar) {
             if (v > 64)
                 text_cat(t, "+");
-            int_text(v - 64, t + strlen(t));
+            int_text(v - 64, t + str_len(t));
         } else {
             int_text(v * 100 / 127, t);
         }
@@ -726,18 +771,79 @@ static void draw_clock(int32_t y)
     cv_rect(98 + 10 * 12 + 4, y + 10, 1, 2, C_SUB);
 }
 
+/* eine Buchse: Mutter und Loch, gesteckt mit rotem Ring */
+static void jack(int32_t cx, int32_t cy, int on)
+{
+    disc(cx, cy, 6, on ? C_LED : C_KEDGE);
+    disc(cx, cy, 4, C_SILVER);
+    disc(cx, cy, 2, C_PANEL);
+}
+
+/* die Patchbay: der gehaltene Ausgang, K1 die Stärke, die gesteckten Eingänge */
+static void draw_patch(uint32_t now)
+{
+    int i, n = 0;
+    jack(16, 8, 1);
+    cv_text(28, 3, &FONT_XS, "OUT", C_SUB);
+    cv_text(52, 3, &FONT_XS, RND_SRC_NAME[(int)ui.src], C_LABEL);
+    cv_rect(8, 17, 224, 1, RGB(44, 44, 48));
+    draw_knob(0, 34, 21, now);
+    for (i = 0; i < eng.v.ncab; i++) {
+        const rnd_cable *c = &eng.v.cab[i];
+        int32_t x, y;
+        if (c->src != ui.src)
+            continue;
+        x = 78 + (n / 4) * 80;
+        y = 28 + (n % 4) * 15;
+        jack(x, y + 5, 0);
+        cv_line(x + 6, y + 5, x + 10, y + 5, C_LED);
+        cv_text(x + 12, y, &FONT_XS, RND_DST_NAME[c->dst], C_LABEL);
+        n++;
+    }
+    if (!n)
+        cv_text(70, 40, &FONT_XS, "TAP A WHITE KEY: IN", C_SUB);
+    cv_text(10, 93, &FONT_XS, "WHITE KEY: PATCH / PULL", C_SUB);
+    cv_text(178, 93, &FONT_XS, "REC: ALL", C_SUB);
+}
+
+/* eine weiße Taste allein: der Eingang und was in ihn geht */
+static void draw_in(void)
+{
+    int i, n = 0;
+    jack(16, 8, cables_into(ui.in_show) > 0);
+    cv_text(28, 3, &FONT_XS, "IN", C_SUB);
+    cv_text(46, 3, &FONT_XS, RND_DST_NAME[(int)ui.in_show], C_LABEL);
+    cv_rect(8, 17, 224, 1, RGB(44, 44, 48));
+    for (i = 0; i < eng.v.ncab; i++) {
+        const rnd_cable *c = &eng.v.cab[i];
+        char t[24] = "";
+        if (c->dst != ui.in_show)
+            continue;
+        text_cat(t, RND_SRC_NAME[c->src]);
+        text_cat(t, c->amt < 0.0f ? "  -" : "  +");
+        int_text((int32_t)((c->amt < 0.0f ? -c->amt : c->amt) * 100.0f + 0.5f), t + str_len(t));
+        jack(24, 34 + n * 15, 1);
+        cv_text(36, 29 + n * 15, &FONT_XS, t, C_LABEL);
+        n++;
+    }
+    if (!n)
+        cv_text(10, 40, &FONT_XS, "NOTHING PATCHED. HOLD A BLACK KEY", C_SUB);
+    cv_text(10, 93, &FONT_XS, "HOLD A BLACK KEY (OUT), TAP THIS ONE", C_SUB);
+}
+
 static void draw_middle(uint32_t now)
 {
     uint32_t i;
-    char t[24];
     wood(110, 30);
-    if (ui.held >= 0) {
-        t[0] = 0;
-        text_cat(t, "STEP ");
-        int_text(ui.held + 1, t + 5);
-        cv_text(10, 3, &FONT_XS, t, C_LABEL);
-        cv_text(60, 3, &FONT_XS, eng.steps[ui.held].on ? "ON" : "OFF", eng.steps[ui.held].on ? C_LED : C_SUB);
-    } else {
+    if (ui.src >= 0) {
+        draw_patch(now);
+        return;
+    }
+    if (ui.in_show >= 0 && now < ui.in_until) {
+        draw_in();
+        return;
+    }
+    {
         int32_t x = cv_text(10, 3, &FONT_XS, PAGE_NAME[ui.page], C_LABEL);
         cv_text(x + 8, 3, &FONT_XS, rnd_preset_name(set.preset), C_SUB);
     }
@@ -753,6 +859,7 @@ static void draw_middle(uint32_t now)
     draw_clock(93);
 }
 
+
 /* die zwei Reihen des DFAM: oben PITCH, unten VELOCITY, dazwischen die LED; darunter die Nummer */
 static void draw_steps(int32_t s)
 {
@@ -764,7 +871,7 @@ static void draw_steps(int32_t s)
     for (i = 0; i < RND_STEPS; i++) {
         int32_t cx = 31 + (int32_t)i * 26;
         const rnd_step *st = &eng.steps[i];
-        int in = (int32_t)i < len, cur = (int32_t)i == s, held = (int8_t)i == ui.held;
+        int in = (int32_t)i < len, cur = (int32_t)i == s, held = 0, on = st->vel > 0.004f;
         char n[4];
         if (!in) {
             disc(cx, 17, 9, RGB(30, 30, 33));
@@ -772,9 +879,11 @@ static void draw_steps(int32_t s)
             ctext(cx, 76, &FONT_XS, "-", RGB(60, 60, 64));
             continue;
         }
+        if (ui.page >= PG_P1 && (int)(i / 4u) == (ui.page == PG_P2 || ui.page == PG_V2))   /* an K1..K4: Ring */
+            disc(cx, ui.page < PG_V1 ? 17 : 62, 11, C_LABEL);
         moog_knob(cx, 17, 9, st->pitch, held, 1, 0);
-        led(cx, 40, cur && st->on);
-        if (!st->on)                     /* ein ausgeschalteter Step: die LED durchgestrichen */
+        led(cx, 40, cur && on);
+        if (!on)                         /* Velocity 0: der Step schweigt, die LED durchgestrichen */
             cv_line(cx - 4, 44, cx + 4, 36, C_SUB);
         moog_knob(cx, 62, 9, st->vel, held, 0, 0);
         n[0] = (char)('1' + i);
@@ -787,10 +896,17 @@ static void draw_steps(int32_t s)
         text_cat(t, "%");
         if (plat_xruns()) {
             text_cat(t, " D");
-            int_text((int32_t)plat_xruns(), t + strlen(t));
+            int_text((int32_t)plat_xruns(), t + str_len(t));
         }
         cv_text(230 - text_w(&FONT_XS, t), 88, &FONT_XS, t, plat_cpu_pct() > 80u ? C_LED : RGB(70, 70, 76));
-        cv_text(10, 88, &FONT_XS, "PADS 9-16", RGB(70, 70, 76));
+        if (eng.v.ncab) {                /* gesteckte Kabel */
+            char c[12] = "";
+            int_text(eng.v.ncab, c);
+            text_cat(c, eng.v.ncab == 1 ? " CABLE" : " CABLES");
+            cv_text(10, 88, &FONT_XS, c, C_LED);
+        } else {
+            cv_text(10, 88, &FONT_XS, "KEYS: PATCHBAY", RGB(70, 70, 76));
+        }
     }
 }
 
@@ -838,12 +954,17 @@ static void draw(void)
 }
 
 /* ------------------------------------------------------------ der Vertrag --- */
+static float fx_rev[RND_REV_FLOATS] __attribute__((section(".pool")));
+static int16_t fx_dl[RND_DLY_FRAMES] __attribute__((section(".pool")));
+static int16_t fx_dr[RND_DLY_FRAMES] __attribute__((section(".pool")));
+
 void app_init(void)
 {
     rnd_init(&eng, SR);
+    rnd_fx_memory(&eng, fx_rev, fx_dl, fx_dr);
     settings_load();
-    ui.held = -1;
-    ui.hold_clock = -1;
+    ui.src = -1;
+    ui.in_show = -1;
 }
 
 static void midi_in(void)
@@ -867,7 +988,7 @@ static void midi_in(void)
 
 void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
 {
-    static float buf[256];
+    static float bl[256], br[256];
     float gain = (float)master_q12 * (1.0f / 4096.0f) * 8300000.0f;
     uint32_t i;
     if (n > 256u)
@@ -884,11 +1005,10 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         rnd_trigger(&eng, trig_pitch, trig_vel);
     }
     midi_in();
-    rnd_render(&eng, buf, (int)n);
+    rnd_render(&eng, bl, br, (int)n);
     for (i = 0; i < n; i++) {
-        int32_t s = (int32_t)(buf[i] * gain);
-        lr[2 * i] = s;
-        lr[2 * i + 1] = s;
+        lr[2 * i] = (int32_t)(bl[i] * gain);
+        lr[2 * i + 1] = (int32_t)(br[i] * gain);
     }
 }
 
@@ -918,8 +1038,8 @@ void app_splash(void)                    /* das Panel: der Name, acht rote LEDs,
 void app_ui_init(void)
 {
     lcd_fill(0, 0, 240, 240, C_PANEL);
-    ui.held = -1;
-    ui.hold_clock = -1;
+    ui.src = -1;
+    ui.in_show = -1;
     ui.step_drawn = -2;
     ui.redraw = 1;
 }
@@ -989,8 +1109,10 @@ int app_expect(const char *what, int *got)
         *got = rnd_clock_index(&eng);
     else if (!strcmp(what, "override"))
         *got = eng.clock_override;
-    else if (!strcmp(what, "gates"))
-        *got = set.gates;
+    else if (!strcmp(what, "cables"))
+        *got = eng.v.ncab;
+    else if (!strcmp(what, "src"))
+        *got = ui.src;
     else if (!strcmp(what, "dirty"))
         *got = set_dirty;
     else if (!strcmp(what, "ext"))

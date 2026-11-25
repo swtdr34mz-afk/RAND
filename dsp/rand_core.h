@@ -24,8 +24,8 @@ enum {
     RP_CUTOFF, RP_RESO, RP_FILTER_MODE, RP_VCF_EG, RP_VCF_DECAY, RP_NOISE_VCF,
     /* VCA */
     RP_VCA_DECAY, RP_VCA_ATTACK, RP_VEL_VCA, RP_VEL_VCF,
-    /* Ausgang */
-    RP_DRIVE, RP_VOLUME,
+    /* Ausgang und FX */
+    RP_DRIVE, RP_VOLUME, RP_REVERB, RP_DELAY, RP_DELAY_TIME, RP_MFILTER,
     /* Sequencer */
     RP_TEMPO, RP_CLOCK, RP_LENGTH,
     RP_COUNT
@@ -55,6 +55,18 @@ typedef struct {
     uint8_t on;
 } rnd_step;
 
+/* --- die Patchbay: 11 Ausgänge (schwarze Tasten), 16 Eingänge (weiße Tasten), bis zu 8 Kabel --- */
+enum { RS_VCO1, RS_VCO2, RS_NOISE, RS_PITCH_EG, RS_VCF_EG, RS_VCA_EG, RS_VEL, RS_PITCH, RS_LFO, RS_RANDOM,
+       RS_TRIGGER, RND_NSRC };
+enum { RD_VCO1, RD_VCO2, RD_FM, RD_LVL1, RD_LVL2, RD_NOISE, RD_CUTOFF, RD_RESO, RD_VCA, RD_DRIVE,
+       /* ab hier einmal pro Block */
+       RD_DECAY, RD_TEMPO, RD_DELAY, RD_REVERB, RD_MFILTER, RD_CRUSH, RND_NDST };
+#define RD_BLOCK RD_DECAY
+#define RND_NCABLES 8
+extern const char *const RND_SRC_NAME[RND_NSRC];
+extern const char *const RND_DST_NAME[RND_NDST];
+typedef struct { uint8_t src, dst; float amt; } rnd_cable;   /* amt -1..1 */
+
 /* --- interne Bausteine (hier, damit rnd_engine eine feste Größe hat; kein Heap) --- */
 typedef struct { float phase, wrap_frac; int wrapped; } rnd_osc;
 typedef struct { float y1, y2, y3, y4; } rnd_ladder;
@@ -71,16 +83,44 @@ typedef struct {
     rnd_noise nz;
     float dc_x1, dc_y1;
     float step_pitch, vel;
+    /* Patchbay */
+    rnd_cable cab[RND_NCABLES];
+    int ncab;
+    float o1v, o2v, nzv, trig, trig_coef, rnd, lfo_ph, lfo_inc;
+    uint32_t rs;
+    float dec_a0;
+    float mod_blk[RND_NDST];             /* die Block-Ziele, vom Engine gelesen */
     /* umgerechnete Werte */
     float f1, f2, eg1, eg2, sq1, sq2, fm, l1, l2, ln, color;
     float cut, reso, egf, nf, vvca, vvcf, drive, vol;
     int w1, w2, sync, hp;
 } rnd_voice;
 
+/* FX: Reverb (je Kanal 4 Kämme + 2 Allpässe), Ping-Pong-Delay, Master-Filter (LP <- Mitte -> HP).
+ * Den Speicher gibt der Host (FM-1: im großen RAM-Pool), ohne Speicher laufen die FX nicht. */
+#define RND_REV_FLOATS 12500
+#define RND_DLY_FRAMES 22050             /* 0.5 s bei 44.1 kHz */
+#define RND_NDIV 6
+extern const char *const RND_DIV_NAME[RND_NDIV];
+typedef struct {
+    float *comb[8], *ap[4];
+    int comb_len[8], comb_pos[8], ap_len[4], ap_pos[4];
+    float comb_f[8];
+    int16_t *dl, *dr;
+    int dpos;
+    float dsm;                           /* Delayzeit, geglättet */
+    float ml1, ml2, mr1, mr2;            /* Master-Filter */
+    float crush_v;
+    int crush_n;
+    int ready;
+} rnd_fx;
+
 typedef struct {
     float sr;
     float p[RP_COUNT];
     rnd_voice v;
+    rnd_fx fx;
+    float mono[256];
     rnd_step steps[RND_STEPS];
     int running, cur;
     float to_next;          /* Samples bis zum nächsten Step */
@@ -106,7 +146,8 @@ void rnd_midi_clock(rnd_engine *e);      /* bei jedem 0xF8 */
 void rnd_trigger(rnd_engine *e, float pitch, float vel);   /* ein Schlag von Hand */
 void rnd_clock_override(rnd_engine *e, int idx);           /* -1 = aus */
 
-void rnd_render(rnd_engine *e, float *out, int n);         /* mono, überschreibt out */
+void rnd_fx_memory(rnd_engine *e, float *rev, int16_t *dl, int16_t *dr);   /* RND_REV_FLOATS, 2x RND_DLY_FRAMES */
+void rnd_render(rnd_engine *e, float *l, float *r, int n);   /* stereo, überschreibt l und r; n <= 256 */
 
 float rnd_bpm(const rnd_engine *e);
 int rnd_clock_index(const rnd_engine *e);
@@ -117,6 +158,13 @@ float rnd_level(const rnd_engine *e);    /* VCA-Hüllkurve jetzt (Anzeige) */
 #define RND_NPRESETS 8
 const char *rnd_preset_name(int i);
 void rnd_preset_load(rnd_engine *e, int i);
+
+/* Patchbay */
+int rnd_patch_toggle(rnd_engine *e, int src, int dst);    /* 1 gesteckt, 0 gezogen, -1 alle Plätze voll */
+int rnd_patch_has(const rnd_engine *e, int src, int dst);
+void rnd_patch_amount(rnd_engine *e, int src, float amt); /* alle Kabel dieses Ausgangs */
+float rnd_patch_get_amount(const rnd_engine *e, int src);
+void rnd_patch_clear(rnd_engine *e, int src);             /* -1: alle */
 
 /* Zufall für die Pitch-/Velocity-Reihen (ARP-Knopf: RAND) */
 void rnd_randomize(rnd_engine *e, uint32_t seed);

@@ -7,6 +7,7 @@ expect page 0
 expect bpm 128
 expect length 8
 expect clock 2
+expect cables 0
 shot boot.png
 tap PLAY
 expect playing 1
@@ -15,60 +16,80 @@ wait 3000
 wavstop
 expect peak_db_min -20
 shot playing.png
-# the pitch row (SEQ): step 3 up
+# HOME again: OSC 2
+tap HOME
+wait 30
+expect page 1
+# the sequencer on the knobs: SEQ, K3 = step 3's pitch
 tap SEQ
 wait 30
-expect page 7
+expect page 8
 turn K3 20
 wait 30
+expect pitch3 84
 shot pitch.png
-# a black key held: the clock jumps to x128 (audio rate)
-key 10 down
+tap SEQ
+tap SEQ
+wait 30
+expect page 10
+turn K2 -40
+wait 30
+shot vel.png
+# the patchbay: hold black key 9 (LFO, key 20), tap white key 7 (CUTOFF, key 11)
+key 20 down
 wait 50
-expect override 10
-shot hold.png
-wav hold.wav
-wait 1500
+expect src 8
+key 11 down
+wait 30
+key 11 up
+wait 30
+expect cables 1
+turn K1 10
+wait 30
+shot patch.png
+key 20 up
+wait 50
+expect src -1
+# a white key alone: what goes in
+key 11 down
+wait 30
+key 11 up
+wait 50
+shot in.png
+wav lfo.wav
+wait 2000
 wavstop
-key 10 up
-wait 50
-expect override -1
-# ALGORITHM: the clock knob
+# ALGORITHM: the clock
 turn ALGO 6
 wait 50
 expect clock 8
 shot clock.png
-turn ALGO -6
-# a step held: its pitch and velocity
-key 4 down
-wait 50
-turn K2 -30
-wait 30
-shot step.png
-key 4 up
-wait 30
-# a tap turns step 1 off
-key 0 down
-wait 30
-key 0 up
-wait 30
-expect gates 220
-# the presets
-turn PRESET 2
-wait 50
-expect preset 2
-wav hats.wav
-wait 2000
+wav audio.wav
+wait 1500
 wavstop
-shot hats.png
-tap HOME
+turn ALGO -6
+# FX
 tap FX
 wait 30
-expect page 5
-shot out.png
+expect page 6
+turn K1 30
+turn K2 30
+wait 30
+shot fx.png
+wav fx.wav
+wait 2500
+wavstop
 tap GLO
 wait 30
 shot switch.png
+# presets carry their cables
+turn PRESET 7
+wait 50
+expect preset 7
+expect cables 2
+wav breakcore.wav
+wait 3000
+wavstop
 tap ARP
 wait 30
 shot rand.png

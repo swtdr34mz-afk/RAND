@@ -56,7 +56,10 @@ int rnd_length(const rnd_engine *e)
 static float samples_per_step(const rnd_engine *e)
 {
     int ci = e->clock_override >= 0 ? e->clock_override : rnd_clock_index(e);
-    float sps = rnd_bpm(e) / 60.0f * 4.0f * RND_CLOCK_MULT[ci], s = e->sr / sps;
+    float sps = rnd_bpm(e) / 60.0f * 4.0f * RND_CLOCK_MULT[ci], s;
+    if (e->v.mod_blk[RD_TEMPO] != 0.0f)  /* Kabel auf TEMPO: bis 2 Oktaven schneller / langsamer */
+        sps *= rnd_exp2(rnd_clamp(e->v.mod_blk[RD_TEMPO], -1.0f, 1.0f) * 2.0f);
+    s = e->sr / sps;
     return s < 4.0f ? 4.0f : s;
 }
 
@@ -99,13 +102,17 @@ static void advance(rnd_engine *e)
     const rnd_step *s;
     e->cur = (e->cur + 1) % rnd_length(e);
     s = &e->steps[e->cur];
-    if (s->on)
+    if (s->on && s->vel > 0.004f)       /* Velocity 0: der Step schweigt */
         voice_trigger(&e->v, s->pitch, s->vel);
 }
 
-void rnd_render(rnd_engine *e, float *out, int n)
+void rnd_render(rnd_engine *e, float *l, float *r, int n)
 {
+    float *out = e->mono;
     int done = 0;
+    if (n > 256)
+        n = 256;
+    e->v.lfo_inc = rnd_bpm(e) / 240.0f / e->sr;   /* LFO: ein Takt */
     while (done < n) {
         int chunk = n - done;
         if (e->running) {
@@ -125,6 +132,7 @@ void rnd_render(rnd_engine *e, float *out, int n)
             e->to_next -= (float)chunk;
         done += chunk;
     }
+    fx_render(e, out, l, r, n);
     e->counter += (uint32_t)n;
     if (e->ext && (float)(e->counter - e->last_clock) > e->sr)   /* eine Sekunde ohne Clock: wieder eigenes Tempo */
         e->ext = 0;
@@ -140,7 +148,69 @@ void rnd_randomize(rnd_engine *e, uint32_t seed)
         s ^= s << 5;
         e->steps[i].pitch = (float)(s & 1023u) / 1023.0f;
         e->steps[i].vel = 0.25f + 0.75f * (float)((s >> 10) & 1023u) / 1023.0f;
-        e->steps[i].on = ((s >> 20) & 7u) != 0;   /* meistens an */
+        if (((s >> 20) & 7u) == 0)       /* manchmal still */
+            e->steps[i].vel = 0.0f;
+        e->steps[i].on = 1;
     }
-    e->steps[0].on = 1;
+    if (e->steps[0].vel < 0.5f)
+        e->steps[0].vel = 1.0f;
+}
+
+/* ---- die Patchbay ---- */
+int rnd_patch_has(const rnd_engine *e, int src, int dst)
+{
+    int i;
+    for (i = 0; i < e->v.ncab; i++)
+        if (e->v.cab[i].src == src && e->v.cab[i].dst == dst)
+            return 1;
+    return 0;
+}
+
+int rnd_patch_toggle(rnd_engine *e, int src, int dst)
+{
+    rnd_voice *v = &e->v;
+    int i;
+    if (src < 0 || src >= RND_NSRC || dst < 0 || dst >= RND_NDST)
+        return -1;
+    for (i = 0; i < v->ncab; i++)
+        if (v->cab[i].src == src && v->cab[i].dst == dst) {   /* gezogen */
+            v->ncab--;
+            for (; i < v->ncab; i++)
+                v->cab[i] = v->cab[i + 1];
+            return 0;
+        }
+    if (v->ncab >= RND_NCABLES)
+        return -1;
+    v->cab[v->ncab].src = (uint8_t)src;
+    v->cab[v->ncab].dst = (uint8_t)dst;
+    v->cab[v->ncab].amt = rnd_patch_get_amount(e, src);
+    v->ncab++;
+    return 1;
+}
+
+float rnd_patch_get_amount(const rnd_engine *e, int src)
+{
+    int i;
+    for (i = 0; i < e->v.ncab; i++)
+        if (e->v.cab[i].src == src)
+            return e->v.cab[i].amt;
+    return 0.5f;                         /* ein neues Kabel: halb */
+}
+
+void rnd_patch_amount(rnd_engine *e, int src, float amt)
+{
+    int i;
+    for (i = 0; i < e->v.ncab; i++)
+        if (e->v.cab[i].src == src)
+            e->v.cab[i].amt = rnd_clamp(amt, -1.0f, 1.0f);
+}
+
+void rnd_patch_clear(rnd_engine *e, int src)
+{
+    rnd_voice *v = &e->v;
+    int i, j = 0;
+    for (i = 0; i < v->ncab; i++)
+        if (src >= 0 && v->cab[i].src != src)
+            v->cab[j++] = v->cab[i];
+    v->ncab = j;
 }

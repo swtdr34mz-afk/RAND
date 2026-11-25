@@ -1,5 +1,5 @@
 {
-  "what": "A raw percussion synth after the Behringer EDGE / Moog DFAM: one voice with two oscillators, FM, sync, noise and a ladder filter, an 8-step sequencer with a pitch row and a velocity row, and a clock that runs up to x128 until the rhythm turns into a tone. Held keys jump the clock, pads, random rows, MIDI clock in.",
+  "what": "A raw percussion synth after the Behringer EDGE / Moog DFAM: one voice with two oscillators, FM, sync, noise and a ladder filter, an 8-step sequencer with a pitch and a velocity knob per step, a clock up to x128 where the rhythm turns into a tone, and the keys as a patchbay: black keys are outputs, white keys inputs, including delay, reverb, master filter and crush. MIDI clock in.",
   "author": "swtdr34mz",
   "kinds": "drums",
   "play": "https://swtdr34mz-afk.github.io/RAND/emu/",

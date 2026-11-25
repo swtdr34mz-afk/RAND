@@ -7,5 +7,6 @@
 
 #include "rand_params.c"
 #include "rand_voice.c"
+#include "rand_fx.c"
 #include "rand_seq.c"
 #include "rand_presets.c"
