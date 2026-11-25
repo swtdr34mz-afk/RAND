@@ -9,7 +9,8 @@ Built on [fm1-base](https://github.com/charlesvestal/fm1-base) and [felucca-bsp]
 
 ## The voice
 
-Two oscillators (triangle or pulse, 8 Hz to 8 kHz without octave switches), FM from VCO 1 to VCO 2, hard sync,
+Two oscillators (triangle or pulse, 8 Hz to 8 kHz without octave switches), 1-2 FM (VCO 1 into VCO 2, and half as much
+back from VCO 2 into VCO 1, so it works even with VCO 2 muted), hard sync,
 white or pink noise, a pitch, a filter and an amp envelope, velocity to amp and filter, drive; then a ping-pong delay
 in tempo whose echoes darken like tape, a reverb and a master filter.
 

@@ -288,11 +288,15 @@ static void voice_render(rnd_voice *v, float *out, int n)
         }
         for (sub = 0; sub < os; sub++) {  /* VCOs, Mixer und Filter mit doppelter Samplerate */
             float inc2, mix;
-            o1 = osc_run(&v->o1, inc1, v->w1);
-            inc2 = rnd_clamp(inc2b * (1.0f + fmi * o1), -0.45f, 0.45f);   /* FM 1>2, durch Null: Metall */
+            /* 1-2 FM als Kreuz-FM: VCO 1 moduliert VCO 2 (durch Null: Metall), und VCO 2 wirkt halb so stark
+             * zurück auf VCO 1. So greift der Regler immer, auch wenn VCO 2 stumm ist (dann ist er der Modulator,
+             * der dem Kick den Klick und den Toms das Metall gibt). */
+            o1 = osc_run(&v->o1, rnd_clamp(inc1 * (1.0f + 0.5f * fmi * v->o2v), -0.45f, 0.45f), v->w1);
+            inc2 = rnd_clamp(inc2b * (1.0f + fmi * o1), -0.45f, 0.45f);
             if (v->sync && v->o1.wrapped)
                 v->o2.phase = rnd_clamp(v->o1.wrap_frac * inc2, 0.0f, 0.999f);
             o2 = osc_run(&v->o2, inc2, v->w2);
+            v->o2v = o2;
             /* der Mixer fährt den Ladder an wie am Original: laut gemischt, sättigt er warm */
             mix = (o1 * l1 + o2 * l2 + nz * ln) * 0.75f * comp;
             y = ladder_run(&v->vcf, mix, g, k, v->hp);
