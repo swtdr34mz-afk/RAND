@@ -5,7 +5,7 @@
   "author": "swtdr34mz",
   "license": "MPL-2.0",
   "tagline": "A raw percussion synth: one voice, eight steps, a clock that turns into a tone",
-  "description": "A semi-modular style percussion synth in the spirit of the Behringer EDGE and Moog DFAM: two oscillators with FM and hard sync, noise, a 24 dB ladder filter (low and high pass), pitch, filter and amp envelopes and drive. An 8-step sequencer with two rows, pitch and velocity, whose clock runs from quarter speed up to x128, where the rhythm turns into a tone; five held keys jump the clock at once. Eight presets, random rows, pads, MIDI clock and transport in to follow a drum machine.",
+  "description": "A percussion synth after the Behringer EDGE and Moog DFAM: two oscillators with FM and sync, noise, a 24 dB ladder filter, three envelopes, drive, ping-pong delay, reverb and master filter. An 8-step sequencer with a pitch and a velocity knob per step whose clock runs up to x128, where the rhythm turns into a tone. The keys are a patchbay: hold a black key (an output: VCOs, noise, envelopes, LFO, random, trigger) and tap a white key (an input: pitch, FM, cutoff, VCA, tempo, delay, reverb, crush). Eight presets, MIDI clock in.",
   "tags": ["drum-machine", "synth"],
   "install": "https://github.com/swtdr34mz-afk/RAND/releases",
   "source": "https://github.com/swtdr34mz-afk/RAND",
