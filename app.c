@@ -179,7 +179,7 @@ static struct {
     uint32_t load_at, load_shown;
 } ui;
 
-static uint32_t str_len(const char *s)    /* (kein strlen auf dem FM-1) */
+static uint32_t txt_len(const char *s)    /* (kein strlen auf dem FM-1) */
 {
     uint32_t n = 0;
     while (s[n])
@@ -264,7 +264,7 @@ static void hz_text(float hz, char *t)
         int32_t d = (int32_t)(hz / 100.0f + 0.5f);
         int_text(d / 10, t);
         text_cat(t, ".");
-        int_text(d % 10, t + str_len(t));
+        int_text(d % 10, t + txt_len(t));
         text_cat(t, "K");
     }
 }
@@ -280,7 +280,7 @@ static void val_text(int id, uint8_t v, char *t)
         int32_t b = (int32_t)v - 64;
         if (b > 0)
             text_cat(t, "+");
-        int_text(b, t + str_len(t));
+        int_text(b, t + txt_len(t));
         return;
     }
     switch (id) {
@@ -298,7 +298,7 @@ static void val_text(int id, uint8_t v, char *t)
             int32_t d = (int32_t)(ms / 100.0f + 0.5f);
             int_text(d / 10, t);
             text_cat(t, ".");
-            int_text(d % 10, t + str_len(t));
+            int_text(d % 10, t + txt_len(t));
             text_cat(t, "S");
         }
         return;
@@ -733,7 +733,7 @@ static void draw_knob(int k, int32_t cx, int32_t y, uint32_t now)
         if (bipolar) {
             if (v > 64)
                 text_cat(t, "+");
-            int_text(v - 64, t + str_len(t));
+            int_text(v - 64, t + txt_len(t));
         } else {
             int_text(v * 100 / 127, t);
         }
@@ -821,7 +821,7 @@ static void draw_in(void)
             continue;
         text_cat(t, RND_SRC_NAME[c->src]);
         text_cat(t, c->amt < 0.0f ? "  -" : "  +");
-        int_text((int32_t)((c->amt < 0.0f ? -c->amt : c->amt) * 100.0f + 0.5f), t + str_len(t));
+        int_text((int32_t)((c->amt < 0.0f ? -c->amt : c->amt) * 100.0f + 0.5f), t + txt_len(t));
         jack(24, 34 + n * 15, 1);
         cv_text(36, 29 + n * 15, &FONT_XS, t, C_LABEL);
         n++;
@@ -896,7 +896,7 @@ static void draw_steps(int32_t s)
         text_cat(t, "%");
         if (plat_xruns()) {
             text_cat(t, " D");
-            int_text((int32_t)plat_xruns(), t + str_len(t));
+            int_text((int32_t)plat_xruns(), t + txt_len(t));
         }
         cv_text(230 - text_w(&FONT_XS, t), 88, &FONT_XS, t, plat_cpu_pct() > 80u ? C_LED : RGB(70, 70, 76));
         if (eng.v.ncab) {                /* gesteckte Kabel */
