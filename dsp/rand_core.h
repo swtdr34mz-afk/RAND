@@ -69,7 +69,7 @@ typedef struct { uint8_t src, dst; float amt; } rnd_cable;   /* amt -1..1 */
 
 /* --- interne Bausteine (hier, damit rnd_engine eine feste Größe hat; kein Heap) --- */
 typedef struct { float phase, wrap_frac; int wrapped; } rnd_osc;
-typedef struct { float y1, y2, y3, y4; } rnd_ladder;
+typedef struct { float s0, s1, s2, s3, t0, t1, t2, last, p3; } rnd_ladder;   /* Huovilainen */
 typedef struct { float level, atk_inc, dec_coef; int attacking; } rnd_env;
 typedef struct { uint32_t s; float b0, b1, b2; } rnd_noise;
 
@@ -82,6 +82,11 @@ typedef struct {
     rnd_env eg_p, eg_f, eg_a;
     rnd_noise nz;
     float dc_x1, dc_y1;
+    float hb[46];                        /* Halbband-Dezimierer (2x Oversampling), Ringpuffer doppelt */
+    int hb_pos;
+    float drift1, drift2, drift_amt;
+    int eco;                             /* 1: ohne Oversampling (spart ~40 % Rechenzeit) */                /* langsame Verstimmung wie bei echten VCOs, in Oktaven */
+    float nz_hold;
     float step_pitch, vel;
     /* Patchbay */
     rnd_cable cab[RND_NCABLES];
@@ -110,7 +115,7 @@ typedef struct {
     int dpos;
     float dsm;                           /* Delayzeit, geglättet */
     float ml1, ml2, mr1, mr2;            /* Master-Filter */
-    float crush_v;
+    float crush_v, dlp_l, dlp_r;
     int crush_n;
     int ready;
 } rnd_fx;

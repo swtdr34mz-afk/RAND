@@ -42,7 +42,7 @@ static inline int16_t to16(float x)
 static inline float comb_run(rnd_fx *f, int c, float x, float fb, float damp)
 {
     float y = f->comb[c][f->comb_pos[c]];
-    f->comb_f[c] = y * (1.0f - damp) + f->comb_f[c] * damp;
+    f->comb_f[c] = y * (1.0f - damp) + f->comb_f[c] * damp + 1e-20f;   /* (+1e-20: keine Denormals) */
     f->comb[c][f->comb_pos[c]] = x + f->comb_f[c] * fb;
     if (++f->comb_pos[c] >= f->comb_len[c])
         f->comb_pos[c] = 0;
@@ -114,8 +114,11 @@ static void fx_render(rnd_engine *e, const float *in, float *l, float *r, int n)
         p1 = p0 + 1 >= RND_DLY_FRAMES ? 0 : p0 + 1;
         yl = ((float)f->dl[p0] + ((float)f->dl[p1] - (float)f->dl[p0]) * fr) * (1.0f / 8192.0f);
         yr = ((float)f->dr[p0] + ((float)f->dr[p1] - (float)f->dr[p0]) * fr) * (1.0f / 8192.0f);
-        f->dl[f->dpos] = to16(dv > 0.0f ? x + yr * fb : 0.0f);
-        f->dr[f->dpos] = to16(yl * fb);
+        /* die Echos werden bei jedem Umlauf etwas dunkler und weicher, wie auf Band */
+        f->dlp_l += 0.38f * (yl - f->dlp_l);
+        f->dlp_r += 0.38f * (yr - f->dlp_r);
+        f->dl[f->dpos] = to16(dv > 0.0f ? rnd_soft(x + f->dlp_r * fb) : 0.0f);
+        f->dr[f->dpos] = to16(rnd_soft(f->dlp_l * fb));
         if (++f->dpos >= RND_DLY_FRAMES)
             f->dpos = 0;
         L = x + yl * wet;

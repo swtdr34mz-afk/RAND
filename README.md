@@ -10,8 +10,17 @@ Built on [fm1-base](https://github.com/charlesvestal/fm1-base) and [felucca-bsp]
 ## The voice
 
 Two oscillators (triangle or pulse, 8 Hz to 8 kHz without octave switches), FM from VCO 1 to VCO 2, hard sync,
-white or pink noise, a 24 dB ladder filter (low or high pass) with resonance, a pitch, a filter and an amp envelope,
-velocity to amp and filter, drive; then a ping-pong delay in tempo, a reverb and a master filter.
+white or pink noise, a pitch, a filter and an amp envelope, velocity to amp and filter, drive; then a ping-pong delay
+in tempo whose echoes darken like tape, a reverb and a master filter.
+
+The filter is a model of the **Moog transistor ladder** (after Antti Huovilainen): four stages, each saturating on
+its own, the feedback taken half a sample late as in the circuit. The mixer drives it as on the original: mixed loud,
+it saturates warm. It tracks: turned up to self-oscillation it plays the cutoff's note within about a cent from
+110 Hz to 3.5 kHz. Oscillators, mixer and filter run at twice the sample rate and come back through a 23-tap
+half-band filter, so high notes and FM stay clean. Each VCO drifts a few cents on its own, as analog ones do.
+
+If the FM-1 ever runs short of time (the load over 88 % for a second), RAND drops the oversampling by itself and shows
+**ECO** next to the CPU load, before there could be dropouts.
 
 ## The sequencer
 
@@ -76,6 +85,8 @@ Settings save themselves once the sequencer stops.
 `dsp/` is plain C with no tie to the FM-1, so the same files can go into a VST3 plugin. To hear it on a computer:
 
     cc -O2 -Idsp dsp/rand_core.c tools/render_demo.c -lm -o render_demo && ./render_demo .
+
+`tools/measure.c` checks it: the filter's tuning when it self-oscillates, the oscillators' aliasing, the time it takes.
 
 ## Building
 

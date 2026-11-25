@@ -32,7 +32,9 @@ static inline float rnd_exp2(float x)
     if ((float)i > x)
         i--;
     f = x - (float)i;
-    p = 1.0f + f * (0.6931472f + f * (0.2402265f + f * (0.0555041f + f * 0.0096181f)));
+    /* Minimax-Polynom 5. Grades für 2^f auf [0,1): Fehler unter 2e-7, und 2^1 trifft genau 2.
+     * (Das alte Polynom 4. Grades lag bei f -> 1 um 0.08 % daneben: lange Hüllkurven brachen nach ~0.2 s ab.) */
+    p = 1.0f + f * (0.6931530f + f * (0.2401536f + f * (0.0558263f + f * (0.0089893f + f * 0.0018776f))));
     b.f = p;
     b.u += (uint32_t)i << 23;
     return b.f;

@@ -177,6 +177,7 @@ static struct {
     int32_t lvl_drawn;
     uint8_t redraw;
     uint32_t load_at, load_shown;
+    uint8_t hot;                         /* wie oft hintereinander die Last zu hoch war */
 } ui;
 
 static uint32_t txt_len(const char *s)    /* (kein strlen auf dem FM-1) */
@@ -891,8 +892,11 @@ static void draw_steps(int32_t s)
         ctext(cx, 76, &FONT_XS, n, held ? C_LED : cur ? C_LABEL : C_SUB);
     }
     {
-        char t[16] = "CPU ";
-        int_text((int32_t)plat_cpu_pct(), t + 4);
+        char t[20] = "";
+        if (eng.v.eco)
+            text_cat(t, "ECO ");
+        text_cat(t, "CPU ");
+        int_text((int32_t)plat_cpu_pct(), t + txt_len(t));
         text_cat(t, "%");
         if (plat_xruns()) {
             text_cat(t, " D");
@@ -1080,6 +1084,16 @@ void app_frame(void)
             ui.load_shown = l;
             ui.redraw = 1;
         }
+        /* Absicherung: bleibt die Last eine Sekunde über 88 %, rechnet die Stimme ohne Oversampling (ECO) weiter,
+         * bevor es Aussetzer gibt. Bis zum Ausschalten. */
+        if (plat_cpu_pct() > 88u && !eng.v.eco) {
+            if (++ui.hot >= 2) {
+                eng.v.eco = 1;
+                app_say("ECO MODE", "CPU HIGH");
+            }
+        } else {
+            ui.hot = 0;
+        }
     }
     /* gespeichert nur, wenn der Sequencer steht: Flash schreiben hält den Audio-Interrupt an (Aussetzer) */
     if (!ui.playing && set_dirty && now - dirty_at > 1500u)
@@ -1111,6 +1125,8 @@ int app_expect(const char *what, int *got)
         *got = eng.clock_override;
     else if (!strcmp(what, "cables"))
         *got = eng.v.ncab;
+    else if (!strcmp(what, "eco"))
+        *got = eng.v.eco;
     else if (!strcmp(what, "src"))
         *got = ui.src;
     else if (!strcmp(what, "dirty"))

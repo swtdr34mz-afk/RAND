@@ -41,19 +41,37 @@ static inline float osc_run(rnd_osc *o, float inc, int pulse)
     return y - blep(t2, dt);
 }
 
-/* ---- 24-dB-Ladder, Sättigung in der Rückkopplung; HP aus den Stufen gemischt ---- */
-static inline float ladder_run(rnd_ladder *f, float x, float g, float reso, int hp)
+/* ---- der Moog-Ladder nach Huovilainen: vier Stufen, jede mit eigener Sättigung (die Transistoren),
+ *      die Rückkopplung über einen halben Sample gemittelt. Läuft mit doppelter Samplerate.
+ *      g und k kommen aus ladder_coefs (Huovilainens Stimmung: Cutoff und Resonanz bleiben über den
+ *      ganzen Bereich richtig, auch die Selbstoszillation trifft den Ton). ---- */
+static inline float ladder_run(rnd_ladder *f, float x, float g, float k, int hp)
 {
-    float k = reso * 4.2f;
-    float in = rnd_soft((x - k * f->y4) * (1.0f + reso * 0.6f));
-    f->y1 += g * (in - f->y1);
-    f->y2 += g * (f->y1 - f->y2);
-    f->y3 += g * (f->y2 - f->y3);
-    f->y4 += g * (f->y3 - f->y4);
-    f->y4 = rnd_clamp(f->y4, -4.0f, 4.0f);
+    float u = rnd_soft(x - k * f->last), t3;
+    f->s0 += g * (u - f->t0);
+    f->t0 = rnd_soft(f->s0);
+    f->s1 += g * (f->t0 - f->t1);
+    f->t1 = rnd_soft(f->s1);
+    f->s2 += g * (f->t1 - f->t2);
+    f->t2 = rnd_soft(f->s2);
+    t3 = rnd_soft(f->s3);
+    f->s3 += g * (f->t2 - t3);
+    f->last = 0.5f * (f->s3 + f->p3);   /* Rückkopplung über einen halben Sample (Huovilainen) */
+    f->p3 = f->s3;
     if (!hp)
-        return f->y4;
-    return in - 4.0f * f->y1 + 6.0f * f->y2 - 4.0f * f->y3 + f->y4;
+        return f->s3;
+    return u - 4.0f * f->s0 + 6.0f * f->s1 - 4.0f * f->s2 + f->s3;   /* HP aus den Stufen (wie am EDGE umschaltbar) */
+}
+
+/* fc: Cutoff / Samplerate (die einfache), res 0..1 -> g, k für den Ladder mit doppelter Samplerate */
+static inline void ladder_coefs(float fc, float res, float os_inv, float *g, float *k)
+{
+    float fcr;
+    fc *= 1.0f + 0.011f * res;           /* die Selbstoszillation zieht ~20 Cent nach unten: ausgeglichen */
+    fcr = 1.8730f * fc * fc * fc + 0.4955f * fc * fc - 0.6490f * fc + 0.9988f;
+    float acr = -3.9364f * fc * fc + 1.8409f * fc + 0.9968f;
+    *g = 1.0f - rnd_exp2(-2.0f * RND_PI * os_inv * fc * fcr * 1.44269504f);
+    *k = 4.2f * res * acr;               /* 4.2: auf Rechtsanschlag schwingt er sicher, über den ganzen Bereich */
 }
 
 /* ---- Attack/Decay-Hüllkurve, Neustart vom aktuellen Pegel (kein Knacksen, auch im Audio-Takt) ---- */
@@ -104,6 +122,7 @@ static void voice_init(rnd_voice *v, float sr)
     v->sr = sr;
     v->nz.s = 0x2545F491u;
     v->rs = 0x6C8E9CF5u;
+    v->drift_amt = 4e-5f;
     v->trig_coef = rnd_expf(-6.9f / (0.015f * sr));    /* TRIGGER: 15 ms Puls */
     v->vel = 1.0f;
     for (i = 0; i < RP_COUNT; i++)
@@ -172,74 +191,119 @@ static inline void sources(const rnd_voice *v, float *s, float ep, float ef, flo
     s[RS_TRIGGER] = v->trig;
 }
 
+/* der Halbband-Dezimierer: 2x Oversampling zurück auf die Samplerate. 23 Taps (Kaiser-Fenster): bis 15 kHz flach,
+ * was über 26 kHz lag (und sonst als Aliasing zurückfiele), mehr als 56 dB leiser. Ringpuffer doppelt lang, damit die
+ * 23 Werte am Stück liegen. */
+#define HB_N 23
+static const float HB_H[6] = {0.003001f, -0.011798f, 0.033245f, -0.084613f, 0.310479f, 0.499918f};
+static inline float hb_push(rnd_voice *v, float a, float b)
+{
+    float *h;
+    int p = v->hb_pos;
+    v->hb[p] = v->hb[p + HB_N] = a;
+    p = p + 1 >= HB_N ? 0 : p + 1;
+    v->hb[p] = v->hb[p + HB_N] = b;
+    p = p + 1 >= HB_N ? 0 : p + 1;
+    v->hb_pos = p;
+    h = v->hb + p;                       /* h[0] der älteste, h[22] der neueste */
+    return HB_H[5] * h[11] + HB_H[4] * (h[10] + h[12]) + HB_H[3] * (h[8] + h[14]) + HB_H[2] * (h[6] + h[16])
+           + HB_H[1] * (h[4] + h[18]) + HB_H[0] * (h[2] + h[20]) - 0.000272f * (h[0] + h[22]);
+}
+
 static void voice_render(rnd_voice *v, float *out, int n)
 {
-    int i;
-    float inv_sr, amp_vel, f_vel, out_gain, wmax, sq;
+    int i, c, any = 0, ncab;
+    float inv_sr2, amp_vel, f_vel, out_gain, fmax, sq, g = 0.0f, k = 0.0f, comp = 1.0f;
+    int os = v->eco ? 1 : 2;             /* 2x Oversampling; ECO (das FM-1 am Limit): einfach */
     float src[RND_NSRC], m[RD_BLOCK];
-    int c, any = 0;
+    rnd_cable cab[RND_NCABLES];
     if (v->dirty)
         voice_update(v);
+    /* die Kabel einmal pro Block abgeschrieben: die Bedienung darf sie derweil ändern */
+    ncab = v->ncab;
+    if (ncab > RND_NCABLES)
+        ncab = RND_NCABLES;
+    for (c = 0; c < ncab; c++)
+        cab[c] = v->cab[c];
     /* die Block-Ziele: einmal pro Block aus den Ausgängen */
     for (c = 0; c < RND_NDST; c++)
         v->mod_blk[c] = 0.0f;
-    if (v->ncab) {
+    if (ncab) {
         sources(v, src, v->eg_p.level, v->eg_f.level, v->eg_a.level);
-        for (c = 0; c < v->ncab; c++)
-            if (v->cab[c].dst >= RD_BLOCK)
-                v->mod_blk[v->cab[c].dst] += src[v->cab[c].src] * v->cab[c].amt;
+        for (c = 0; c < ncab; c++)
+            if (cab[c].dst >= RD_BLOCK)
+                v->mod_blk[cab[c].dst] += src[cab[c].src] * cab[c].amt;
             else
                 any = 1;
-        if (v->mod_blk[RD_DECAY] != 0.0f)   /* DECAY: die VCA-Hüllkurve, bis 3 Oktaven länger / kürzer */
-            env_times(&v->eg_a, v->p[RP_VCA_ATTACK] >= 0.5f ? 0.012f : 0.0004f,
-                      decay_sec(v->p[RP_VCA_DECAY]) * rnd_exp2(v->mod_blk[RD_DECAY] * 3.0f), v->sr);
-        else if (v->eg_a.dec_coef != v->dec_a0)
-            v->dirty = 1;
     }
-    inv_sr = 1.0f / v->sr;
-    wmax = 0.45f * v->sr;
+    if (v->mod_blk[RD_DECAY] != 0.0f)   /* DECAY: die VCA-Hüllkurve, bis 3 Oktaven länger / kürzer */
+        env_times(&v->eg_a, v->p[RP_VCA_ATTACK] >= 0.5f ? 0.012f : 0.0004f,
+                  decay_sec(v->p[RP_VCA_DECAY]) * rnd_exp2(v->mod_blk[RD_DECAY] * 3.0f), v->sr);
+    else if (v->eg_a.dec_coef != v->dec_a0)   /* das Kabel ist weg: die eigene Decay-Zeit zurück */
+        v->eg_a.dec_coef = v->dec_a0;
+    inv_sr2 = 1.0f / ((float)os * v->sr);
+    fmax = rnd_clamp(0.45f * v->sr, 1000.0f, 20000.0f);
     amp_vel = 1.0f - v->vvca + v->vvca * v->vel;
     f_vel = v->vvcf * (v->vel - 0.5f);
     /* der Drive wird ausgeglichen, damit die Lautstärke ungefähr bleibt */
     sq = 0.6f + 0.4f * (1.0f + (v->drive - 1.0f) * 0.26f);   /* ~ sqrt(drive), ohne libm */
-    out_gain = 1.5f * v->vol / sq;
+    out_gain = 1.9f * v->vol / sq;
+    for (c = 0; c < RD_BLOCK; c++)
+        m[c] = 0.0f;
     for (i = 0; i < n; i++) {
         float ep = env_run(&v->eg_p), ef = env_run(&v->eg_f), ea = env_run(&v->eg_a);
-        float hz1, hz2, inc1, inc2, o1, o2, nz, mix, fc, wc, y, amp;
-        if (any) {                       /* die Kabel zu den Ziele pro Sample */
+        float inc1, inc2b, fmi, nz, fc, l1, l2, ln, y = 0.0f, amp, ya = 0.0f, o1 = 0.0f, o2 = 0.0f;
+        int sub;
+        if (any) {                       /* die Kabel zu den Zielen pro Sample */
             for (c = 0; c < RD_BLOCK; c++)
                 m[c] = 0.0f;
             sources(v, src, ep, ef, ea);
-            for (c = 0; c < v->ncab; c++)
-                if (v->cab[c].dst < RD_BLOCK)
-                    m[v->cab[c].dst] += src[v->cab[c].src] * v->cab[c].amt;
-        } else {
-            for (c = 0; c < RD_BLOCK; c++)
-                m[c] = 0.0f;
+            for (c = 0; c < ncab; c++)
+                if (cab[c].dst < RD_BLOCK)
+                    m[cab[c].dst] += src[cab[c].src] * cab[c].amt;
         }
         v->trig *= v->trig_coef;
         v->lfo_ph += v->lfo_inc;
         if (v->lfo_ph >= 1.0f)
             v->lfo_ph -= 1.0f;
-        hz1 = 8.0f * rnd_exp2(v->f1 + v->eg1 * ep + v->sq1 * v->step_pitch + m[RD_VCO1] * 3.0f);
-        hz2 = 8.0f * rnd_exp2(v->f2 + v->eg2 * ep + v->sq2 * v->step_pitch + m[RD_VCO2] * 3.0f);
-        inc1 = rnd_clamp(hz1 * inv_sr, 0.0f, 0.45f);
-        o1 = osc_run(&v->o1, inc1, v->w1);
-        inc2 = hz2 * inv_sr * (1.0f + (v->fm + m[RD_FM] * 4.0f) * o1);   /* FM 1>2, durch Null: Metall */
-        inc2 = rnd_clamp(inc2, -0.45f, 0.45f);
-        if (v->sync && v->o1.wrapped)
-            v->o2.phase = rnd_clamp(v->o1.wrap_frac * inc2, 0.0f, 0.999f);
-        o2 = osc_run(&v->o2, inc2, v->w2);
+        /* die VCOs wandern ein paar Cent, jeder für sich, wie echte analoge Oszillatoren */
+        v->rs ^= v->rs << 13;
+        v->rs ^= v->rs >> 17;
+        v->rs ^= v->rs << 5;
+        v->drift1 += v->drift_amt * ((float)(int32_t)v->rs * (1.0f / 2147483648.0f)) - 2e-5f * v->drift1;
+        v->drift2 += v->drift_amt * ((float)(int32_t)(v->rs * 2654435761u) * (1.0f / 2147483648.0f)) - 2e-5f * v->drift2;
+        inc1 = 8.0f * rnd_exp2(v->f1 + v->eg1 * ep + v->sq1 * v->step_pitch + m[RD_VCO1] * 3.0f + v->drift1) * inv_sr2;
+        inc1 = rnd_clamp(inc1, 0.0f, 0.45f);
+        inc2b = 8.0f * rnd_exp2(v->f2 + v->eg2 * ep + v->sq2 * v->step_pitch + m[RD_VCO2] * 3.0f + v->drift2) * inv_sr2;
+        fmi = v->fm + m[RD_FM] * 4.0f;
         nz = noise_run(&v->nz, v->color);
+        l1 = rnd_clamp(v->l1 + m[RD_LVL1], 0.0f, 1.5f);
+        l2 = rnd_clamp(v->l2 + m[RD_LVL2], 0.0f, 1.5f);
+        ln = rnd_clamp(v->ln + m[RD_NOISE], 0.0f, 1.5f);
+        if (!(i & 1)) {                  /* die Filter-Koeffizienten alle zwei Samples (22 kHz Steuerrate) */
+            fc = 20.0f * rnd_exp2(v->cut + v->egf * ef + v->nf * nz + f_vel + m[RD_CUTOFF] * 4.0f);
+            fc = rnd_clamp(fc, 15.0f, fmax);
+            ladder_coefs(fc / v->sr, rnd_clamp(v->reso + m[RD_RESO] * 0.8f, 0.0f, 1.0f), 1.0f / (float)os, &g, &k);
+            comp = 1.0f + k * 0.1f;      /* ein Teil des Basses, den die Resonanz frisst, kommt zurück */
+        }
+        for (sub = 0; sub < os; sub++) {  /* VCOs, Mixer und Filter mit doppelter Samplerate */
+            float inc2, mix;
+            o1 = osc_run(&v->o1, inc1, v->w1);
+            inc2 = rnd_clamp(inc2b * (1.0f + fmi * o1), -0.45f, 0.45f);   /* FM 1>2, durch Null: Metall */
+            if (v->sync && v->o1.wrapped)
+                v->o2.phase = rnd_clamp(v->o1.wrap_frac * inc2, 0.0f, 0.999f);
+            o2 = osc_run(&v->o2, inc2, v->w2);
+            /* der Mixer fährt den Ladder an wie am Original: laut gemischt, sättigt er warm */
+            mix = (o1 * l1 + o2 * l2 + nz * ln) * 0.75f * comp;
+            y = ladder_run(&v->vcf, mix, g, k, v->hp);
+            if (!sub)
+                ya = y;
+        }
+        if (os == 2)
+            y = hb_push(v, ya, y);
         v->o1v = o1;
         v->o2v = o2;
         v->nzv = nz;
-        mix = (o1 * rnd_clamp(v->l1 + m[RD_LVL1], 0.0f, 1.5f) + o2 * rnd_clamp(v->l2 + m[RD_LVL2], 0.0f, 1.5f)
-               + nz * rnd_clamp(v->ln + m[RD_NOISE], 0.0f, 1.5f)) * 0.6f;
-        fc = 20.0f * rnd_exp2(v->cut + v->egf * ef + v->nf * nz + f_vel + m[RD_CUTOFF] * 4.0f);
-        fc = rnd_clamp(fc, 15.0f, wmax);
-        wc = 2.0f * RND_PI * fc * inv_sr;
-        y = ladder_run(&v->vcf, mix, wc / (1.0f + wc), rnd_clamp(v->reso + m[RD_RESO] * 0.8f, 0.0f, 1.0f), v->hp);
         amp = ea * amp_vel * (1.0f + m[RD_VCA]);   /* VCA: mit VCO oder NOISE wird das Ringmodulation */
         y = rnd_soft(y * amp * v->drive * (1.0f + rnd_clamp(m[RD_DRIVE], -0.9f, 4.0f) * 2.0f));
         {   /* DC-Blocker, dann Sicherheits-Limiter */

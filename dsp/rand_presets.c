@@ -24,7 +24,7 @@ static const rnd_pv PV_KICK[] = {
     {RP_REVERB, 0.1f},
     {RP_VCO1_FREQ, 0.25f}, {RP_VCO1_WAVE, 0.f}, {RP_VCO1_EG, 0.80f}, {RP_PITCH_DECAY, 0.33f},
     {RP_VCO1_LVL, 1.f}, {RP_CUTOFF, 0.72f}, {RP_RESO, 0.15f}, {RP_VCF_EG, 0.62f}, {RP_VCF_DECAY, 0.40f},
-    {RP_VCA_DECAY, 0.62f}, {RP_DRIVE, 0.55f}, {RP_VEL_VCA, 0.7f}, {RP_TEMPO, 0.367f}, {RP_CLOCK, 0.2f},
+    {RP_VCA_DECAY, 0.53f}, {RP_DRIVE, 0.55f}, {RP_VEL_VCA, 0.7f}, {RP_TEMPO, 0.367f}, {RP_CLOCK, 0.2f},
 };
 static const rnd_pv PV_EBM[] = {
     {RP_DELAY, 0.3f}, {RP_DELAY_TIME, 0.4f}, {RP_REVERB, 0.1f},
@@ -52,8 +52,8 @@ static const rnd_pv PV_TOMS[] = {
 static const rnd_pv PV_CRACK[] = {
     {RP_REVERB, 0.35f},
     {RP_VCO1_FREQ, 0.49f}, {RP_VCO1_WAVE, 0.f}, {RP_VCO1_EG, 0.62f}, {RP_PITCH_DECAY, 0.30f},
-    {RP_VCO1_LVL, 0.7f}, {RP_NOISE_LVL, 0.9f}, {RP_CUTOFF, 0.74f}, {RP_RESO, 0.2f}, {RP_VOLUME, 1.f},
-    {RP_VCF_EG, 0.65f}, {RP_VCF_DECAY, 0.40f}, {RP_VCA_DECAY, 0.50f}, {RP_DRIVE, 0.6f},
+    {RP_VCO1_LVL, 0.9f}, {RP_NOISE_LVL, 1.0f}, {RP_CUTOFF, 0.74f}, {RP_RESO, 0.2f}, {RP_VOLUME, 1.f},
+    {RP_VCF_EG, 0.65f}, {RP_VCF_DECAY, 0.40f}, {RP_VCA_DECAY, 0.52f}, {RP_DRIVE, 0.78f},
     {RP_TEMPO, 0.367f}, {RP_CLOCK, 0.2f},
 };
 static const rnd_pv PV_ZAP[] = {
@@ -61,7 +61,7 @@ static const rnd_pv PV_ZAP[] = {
     {RP_VCO1_FREQ, 0.60f}, {RP_VCO1_WAVE, 1.f}, {RP_VCO1_EG, 0.92f}, {RP_PITCH_DECAY, 0.50f},
     {RP_VCO2_FREQ, 0.70f}, {RP_VCO2_WAVE, 1.f}, {RP_VCO2_EG, 0.75f}, {RP_SYNC, 1.f},
     {RP_VCO1_LVL, 0.f}, {RP_VCO2_LVL, 0.8f}, {RP_CUTOFF, 0.62f}, {RP_RESO, 0.7f},
-    {RP_VCF_EG, 0.7f}, {RP_VCF_DECAY, 0.45f}, {RP_VCA_DECAY, 0.50f}, {RP_DRIVE, 0.5f},
+    {RP_VCF_EG, 0.7f}, {RP_VCF_DECAY, 0.45f}, {RP_VCA_DECAY, 0.50f}, {RP_DRIVE, 0.6f}, {RP_VOLUME, 1.f},
     {RP_VCO2_SEQ, 0.8f}, {RP_TEMPO, 0.375f}, {RP_CLOCK, 0.2f},
 };
 static const rnd_pv PV_AUDIO[] = {
