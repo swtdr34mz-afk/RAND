@@ -62,7 +62,7 @@ static const rnd_pv PV_ZAP[] = {
     {RP_VCO2_FREQ, 0.70f}, {RP_VCO2_WAVE, 1.f}, {RP_VCO2_EG, 0.75f}, {RP_SYNC, 1.f},
     {RP_VCO1_LVL, 0.f}, {RP_VCO2_LVL, 0.8f}, {RP_CUTOFF, 0.62f}, {RP_RESO, 0.7f},
     {RP_VCF_EG, 0.7f}, {RP_VCF_DECAY, 0.45f}, {RP_VCA_DECAY, 0.50f}, {RP_DRIVE, 0.6f}, {RP_VOLUME, 1.f},
-    {RP_VCO2_SEQ, 0.8f}, {RP_TEMPO, 0.375f}, {RP_CLOCK, 0.2f},
+    {RP_VCO2_SEQ, 0.8f}, {RP_VCO1_SEQ, 0.5f}, {RP_TEMPO, 0.375f}, {RP_CLOCK, 0.2f},
 };
 static const rnd_pv PV_AUDIO[] = {
     {RP_REVERB, 0.2f},
@@ -74,7 +74,7 @@ static const rnd_pv PV_AUDIO[] = {
 static const rnd_pv PV_BREAK[] = {
     {RP_REVERB, 0.12f},
     {RP_VCO1_FREQ, 0.30f}, {RP_VCO1_WAVE, 0.f}, {RP_VCO1_EG, 0.78f}, {RP_PITCH_DECAY, 0.36f},
-    {RP_VCO1_SEQ, 0.85f}, {RP_VCO2_FREQ, 0.55f}, {RP_VCO2_WAVE, 1.f}, {RP_FM, 0.35f},
+    {RP_VCO1_SEQ, 0.85f}, {RP_VCO2_SEQ, 0.5f}, {RP_VCO2_FREQ, 0.55f}, {RP_VCO2_WAVE, 1.f}, {RP_FM, 0.35f},
     {RP_VCO1_LVL, 0.9f}, {RP_VCO2_LVL, 0.2f}, {RP_NOISE_LVL, 0.45f}, {RP_CUTOFF, 0.66f},
     {RP_RESO, 0.35f}, {RP_VCF_EG, 0.68f}, {RP_VCF_DECAY, 0.38f}, {RP_VCA_DECAY, 0.48f},
     {RP_DRIVE, 0.85f}, {RP_TEMPO, 0.542f}, {RP_CLOCK, 0.3f},

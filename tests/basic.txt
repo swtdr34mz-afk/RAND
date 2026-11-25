@@ -96,3 +96,13 @@ shot rand.png
 tap PLAY
 wait 3000
 expect dirty 0
+# a knob with nothing to act on says why: OSC 2 in RAND KICK (VCO 2 muted), FM / NOISE page (DELAY TIME, COLOR)
+turn PRESET 1
+wait 50
+tap HOME
+tap HOME
+wait 30
+shot hint_osc2.png
+tap GLO
+wait 30
+shot hint_switch.png

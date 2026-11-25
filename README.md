@@ -47,6 +47,10 @@ Laid out like the EDGE's panel.
 
 The steps under the knobs get a white ring. A velocity of 0 silences a step.
 
+A knob that has nothing to act on right now says why in red under it, for example `LVL2=0` on the OSC 2 page while
+VCO 2 is muted, `DLY=0` for the delay time while the delay is off, or `FLAT` for SEQ PITCH while all eight pitch knobs
+stand alike.
+
 ## The patchbay on the keys
 
 The keys are the patch points: the **11 black keys are outputs**, the **16 white keys are inputs**. Hold a black key
@@ -87,6 +91,7 @@ Settings save themselves once the sequencer stops.
 
     cc -O2 -Idsp dsp/rand_core.c tools/render_demo.c -lm -o render_demo && ./render_demo .
 
+`tools/knobcheck.c` turns every knob in every preset from one end to the other and measures what changes.
 `tools/measure.c` checks it: the filter's tuning when it self-oscillates, the oscillators' aliasing, the time it takes.
 
 ## Building

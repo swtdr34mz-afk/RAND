@@ -705,6 +705,39 @@ static void led(int32_t cx, int32_t cy, int on)
         cv_rect(cx - 1, cy - 2, 2, 1, RGB(255, 170, 160));
 }
 
+/* ein Regler, der gerade nichts zu tun hat, sagt, woran es liegt (statt stumm zu bleiben) */
+static int row_flat(void)
+{
+    uint32_t i;
+    for (i = 1; i < RND_STEPS; i++)
+        if (set.pitch[i] != set.pitch[0])
+            return 0;
+    return 1;
+}
+static const char *needs(knob_t kb)
+{
+    const uint8_t *v = set.v;
+    int vco2_off = v[RP_VCO2_LVL] == 0 && v[RP_FM] == 0;
+    if (kb.amt)
+        return 0;
+    if (kb.step >= 0)
+        return !kb.vel && v[RP_VCO1_SEQ] == 64 && v[RP_VCO2_SEQ] == 64 ? "SEQ=0" : 0;
+    switch (kb.id) {
+    case RP_VCO2_FREQ:
+    case RP_VCO2_EG:
+    case RP_VCO2_WAVE:
+    case RP_SYNC: return vco2_off ? "LVL2=0" : 0;
+    case RP_VCO2_SEQ: return vco2_off ? "LVL2=0" : row_flat() ? "FLAT" : 0;
+    case RP_VCO1_SEQ: return row_flat() ? "FLAT" : 0;
+    case RP_VCO1_WAVE: return v[RP_VCO1_LVL] == 0 && v[RP_FM] == 0 && v[RP_SYNC] < 64 ? "LVL1=0" : 0;
+    case RP_DELAY_TIME: return v[RP_DELAY] == 0 ? "DLY=0" : 0;
+    case RP_NOISE_COLOR: return v[RP_NOISE_LVL] == 0 && v[RP_NOISE_VCF] == 0 ? "NOISE=0" : 0;
+    case RP_PITCH_DECAY: return v[RP_VCO1_EG] == 64 && v[RP_VCO2_EG] == 64 ? "ENV=0" : 0;
+    case RP_VCF_DECAY: return v[RP_VCF_EG] == 64 ? "ENV=0" : 0;
+    default: return 0;
+    }
+}
+
 static void draw_knob(int k, int32_t cx, int32_t y, uint32_t now)
 {
     knob_t kb = knob_of(k);
@@ -720,6 +753,10 @@ static void draw_knob(int k, int32_t cx, int32_t y, uint32_t now)
         if (RND_PARAMS[kb.id].kind == RK_SWITCH) {
             ctext(cx, y, &FONT_XS, name, hot ? C_LED : C_LABEL);
             toggle(cx, y + 40, v >= 64, RND_PARAMS[kb.id].on, RND_PARAMS[kb.id].off, hot);
+            if (needs(kb)) {                 /* wirkt gerade nicht: der Grund statt des oberen Namens */
+                cv_rect(cx - 28, y + 15, 57, 13, C_PANEL);
+                ctext(cx, y + 16, &FONT_XS, needs(kb), RGB(190, 70, 56));
+            }
             return;
         }
     } else {
@@ -741,7 +778,10 @@ static void draw_knob(int k, int32_t cx, int32_t y, uint32_t now)
     }
     ctext(cx, y, &FONT_XS, name, hot ? C_LED : C_LABEL);
     moog_knob(cx, y + 34, 14, (float)v / 127.0f, hot, bipolar, 1);
-    ctext(cx, y + 56, &FONT_XS, t, hot ? C_LABEL : C_SUB);
+    if (needs(kb) && !hot)               /* wirkt gerade nicht: warum (beim Drehen wieder der Wert) */
+        ctext(cx, y + 56, &FONT_XS, needs(kb), RGB(190, 70, 56));
+    else
+        ctext(cx, y + 56, &FONT_XS, t, hot ? C_LABEL : C_SUB);
 }
 
 /* wo man ist: die Seiten als kleine graue Taster, die aktuelle weiß */
