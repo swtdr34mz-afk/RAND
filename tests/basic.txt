@@ -1,0 +1,77 @@
+# RAND in the host simulator:
+#   X0X_FONTSET=terminus python3 fm1-base/tools/build.py . --host, then build/host/rand_host tests/basic.txt build/host
+splashshot splash.png
+wait 800
+expect preset 0
+expect page 0
+expect bpm 128
+expect length 8
+expect clock 2
+shot boot.png
+tap PLAY
+expect playing 1
+wav kick.wav
+wait 3000
+wavstop
+expect peak_db_min -20
+shot playing.png
+# the pitch row (SEQ): step 3 up
+tap SEQ
+wait 30
+expect page 7
+turn K3 20
+wait 30
+shot pitch.png
+# a black key held: the clock jumps to x128 (audio rate)
+key 10 down
+wait 50
+expect override 10
+shot hold.png
+wav hold.wav
+wait 1500
+wavstop
+key 10 up
+wait 50
+expect override -1
+# ALGORITHM: the clock knob
+turn ALGO 6
+wait 50
+expect clock 8
+shot clock.png
+turn ALGO -6
+# a step held: its pitch and velocity
+key 4 down
+wait 50
+turn K2 -30
+wait 30
+shot step.png
+key 4 up
+wait 30
+# a tap turns step 1 off
+key 0 down
+wait 30
+key 0 up
+wait 30
+expect gates 220
+# the presets
+turn PRESET 2
+wait 50
+expect preset 2
+wav hats.wav
+wait 2000
+wavstop
+shot hats.png
+tap HOME
+tap FX
+wait 30
+expect page 5
+shot out.png
+tap GLO
+wait 30
+shot switch.png
+tap ARP
+wait 30
+shot rand.png
+tap PLAY
+wait 3000
+expect dirty 0

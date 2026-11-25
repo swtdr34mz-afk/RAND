@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "id": "rand",
+  "name": "RAND",
+  "author": "swtdr34mz",
+  "license": "MPL-2.0",
+  "tagline": "A raw percussion synth: one voice, eight steps, a clock that turns into a tone",
+  "description": "A semi-modular style percussion synth in the spirit of the Behringer EDGE and Moog DFAM: two oscillators with FM and hard sync, noise, a 24 dB ladder filter (low and high pass), pitch, filter and amp envelopes and drive. An 8-step sequencer with two rows, pitch and velocity, whose clock runs from quarter speed up to x128, where the rhythm turns into a tone; five held keys jump the clock at once. Eight presets, random rows, pads, MIDI clock and transport in to follow a drum machine.",
+  "tags": ["drum-machine", "synth"],
+  "install": "https://github.com/swtdr34mz-afk/RAND/releases",
+  "source": "https://github.com/swtdr34mz-afk/RAND",
+  "hardware": {
+    "models": ["FM-1"],
+    "flash": ["856014", "B36014"],
+    "features": ["usb-audio-in", "usb-audio-out", "screen-reader"]
+  },
+  "credits": "Built on fm1-base (Charles Vestal) and felucca-bsp (Leo Kuroshita, Hügelton Instruments)."
+}
