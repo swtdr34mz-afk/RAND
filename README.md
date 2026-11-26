@@ -104,7 +104,7 @@ Settings save themselves once the sequencer stops.
 ## Building
 
     git clone --recursive https://github.com/swtdr34mz-afk/RAND
-    X0X_FONTSET=terminus python3 fm1-base/tools/build.py . --host
+    X0X_FONTSET=barlow python3 fm1-base/tools/build.py . --host
     build/host/rand_host tests/basic.txt build/host
 
 GitHub Actions builds the installable `.fwsc` on every push (Actions tab > the run > Artifacts). A tag `v0.1.0` makes a

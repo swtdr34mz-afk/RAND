@@ -1,5 +1,5 @@
-# RAND build settings (fm1-base tools/build.py). The pixel type of the screens: X0X_FONTSET=terminus in the
-# environment (the workflow sets it; for a local build: X0X_FONTSET=terminus python3 fm1-base/tools/build.py . --host)
+# RAND build settings (fm1-base tools/build.py). The type of the screens (smoothed Barlow): X0X_FONTSET=barlow in the
+# environment (the workflow sets it; for a local build: X0X_FONTSET=barlow python3 fm1-base/tools/build.py . --host)
 name = "rand"                     # the build's file names: rand-0.1.fwsc, build/host/rand_host
 title = "RAND"                    # the name people see (firmware hubs)
 id_prefix = "FM-1_588"            # package identity: dev FM-1_58800, releases FM-1_588 + XXYYZZ

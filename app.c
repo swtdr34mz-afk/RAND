@@ -649,60 +649,119 @@ static void wood(int32_t h, int32_t y0)  /* die Holzwangen, mit Maserung (fest a
     }
 }
 
-static void disc(int32_t cx, int32_t cy, int32_t r, uint16_t c)
+/* ---- geglättetes Zeichnen: das Display hat feste 240 x 240 Pixel, also bekommen Kanten Zwischentöne statt
+ *      Treppen (jedes Randpixel mischt die Farbe nach dem Anteil, den die Form von ihm bedeckt) ---- */
+static inline void aa_px(int32_t x, int32_t y, uint16_t c, int32_t a)   /* a 0..256 */
 {
-    int32_t dy;
-    for (dy = -r; dy <= r; dy++) {
-        int32_t w = 0;
-        while ((w + 1) * (w + 1) + dy * dy <= r * r)
-            w++;
-        cv_rect(cx - w, cy + dy, 2 * w + 1, 1, c);
+    uint32_t i, d, r, g, b;
+    if (a <= 0)
+        return;
+    y += cv_oy;
+    if ((uint32_t)x >= cv_w || y < cv_y0 || y >= cv_y1)
+        return;
+    i = (uint32_t)y * cv_w + (uint32_t)x;
+    if (a >= 256) {
+        cv_px[i] = swap16(c);
+        return;
     }
+    d = swap16(cv_px[i]);
+    r = (((c >> 11) & 31u) * (uint32_t)a + ((d >> 11) & 31u) * (uint32_t)(256 - a)) >> 8;
+    g = (((c >> 5) & 63u) * (uint32_t)a + ((d >> 5) & 63u) * (uint32_t)(256 - a)) >> 8;
+    b = ((c & 31u) * (uint32_t)a + (d & 31u) * (uint32_t)(256 - a)) >> 8;
+    cv_px[i] = swap16((r << 11) | (g << 5) | b);
 }
 
-/* ein Regler: Skala (11 Striche über 270°), schwarzer Körper, Silberkappe, weißer Zeiger. v 0..1 */
+/* eine Kreisfläche (Mittelpunkt und Radius in Pixeln, auch krumm), alpha 0..256 */
+static void aa_disc_a(float cx, float cy, float r, uint16_t c, int32_t alpha)
+{
+    int32_t x, y, x0 = (int32_t)(cx - r - 1.0f), x1 = (int32_t)(cx + r + 2.0f);
+    int32_t y0 = (int32_t)(cy - r - 1.0f), y1 = (int32_t)(cy + r + 2.0f);
+    float in2 = (r - 0.5f) * (r - 0.5f), out2 = (r + 0.5f) * (r + 0.5f);
+    if (r < 0.5f)
+        in2 = 0.0f;
+    for (y = y0; y <= y1; y++) {
+        float dy = (float)y - cy;
+        for (x = x0; x <= x1; x++) {
+            float dx = (float)x - cx, d2 = dx * dx + dy * dy;
+            if (d2 >= out2)
+                continue;
+            if (d2 <= in2)
+                aa_px(x, y, c, alpha);
+            else
+                aa_px(x, y, c, (int32_t)((r + 0.5f - fm_sqrtf(d2)) * (float)alpha));
+        }
+    }
+}
+static void aa_disc(float cx, float cy, float r, uint16_t c) { aa_disc_a(cx, cy, r, c, 256); }
+
+/* eine Linie mit runden Enden, w Pixel breit */
+static void aa_line(float x0, float y0, float x1, float y1, float w, uint16_t c)
+{
+    float dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy, h = w * 0.5f;
+    int32_t x, y, bx0 = (int32_t)(fm_minf(x0, x1) - h - 1.0f), bx1 = (int32_t)(fm_maxf(x0, x1) + h + 2.0f);
+    int32_t by0 = (int32_t)(fm_minf(y0, y1) - h - 1.0f), by1 = (int32_t)(fm_maxf(y0, y1) + h + 2.0f);
+    for (y = by0; y <= by1; y++)
+        for (x = bx0; x <= bx1; x++) {
+            float px = (float)x - x0, py = (float)y - y0, t = l2 > 0.0f ? (px * dx + py * dy) / l2 : 0.0f, ex, ey, d;
+            t = fm_clampf(t, 0.0f, 1.0f);
+            ex = px - t * dx;
+            ey = py - t * dy;
+            d = fm_sqrtf(ex * ex + ey * ey);
+            if (d < h + 0.5f)
+                aa_px(x, y, c, (int32_t)(fm_clampf(h + 0.5f - d, 0.0f, 1.0f) * 256.0f));
+        }
+}
+
+static void disc(int32_t cx, int32_t cy, int32_t r, uint16_t c) { aa_disc((float)cx, (float)cy, (float)r + 0.3f, c); }
+
+/* ein Regler: Skala (11 Striche über 270°), schwarzer Körper mit Rand, Silberkappe mit Glanz, weißer Zeiger. v 0..1 */
 static void moog_knob(int32_t cx, int32_t cy, int32_t r, float v, int hot, int bip, int ticks)
 {
-    int32_t i, cap = r * 11 / 20;
-    float a, sn, cs;
+    int32_t i;
+    float a, sn, cs, fx = (float)cx, fy = (float)cy, fr = (float)r + 0.3f, cap = fr * 0.55f;
     if (ticks)
         for (i = 0; i <= 10; i++) {
+            float r0 = fr + 2.2f, r1 = fr + (i == 5 && bip ? 5.6f : 4.6f);
             a = (-135.0f + 27.0f * (float)i) * 0.017453293f;
             sn = fm_sinf(a);
             cs = fm_cosf(a);
-            cv_line(cx + (int32_t)(sn * (float)(r + 2)), cy - (int32_t)(cs * (float)(r + 2)),
-                    cx + (int32_t)(sn * (float)(r + (i == 5 && bip ? 5 : 4))),
-                    cy - (int32_t)(cs * (float)(r + (i == 5 && bip ? 5 : 4))), i == 5 && bip ? C_LABEL : C_TICK);
+            aa_line(fx + sn * r0, fy - cs * r0, fx + sn * r1, fy - cs * r1, 1.1f, i == 5 && bip ? C_LABEL : C_TICK);
         }
-    disc(cx, cy, r, hot ? C_SUB : C_KEDGE);
-    disc(cx, cy, r - 1, C_KBODY);
+    aa_disc(fx, fy, fr, hot ? C_SUB : C_KEDGE);
+    aa_disc(fx, fy, fr - 1.2f, C_KBODY);
+    aa_disc_a(fx - fr * 0.2f, fy - fr * 0.25f, fr * 0.75f, RGB(60, 60, 66), 70);   /* ein Hauch Licht auf dem Rock */
     a = (-135.0f + 270.0f * fm_clampf(v, 0.0f, 1.0f)) * 0.017453293f;
     sn = fm_sinf(a);
     cs = fm_cosf(a);
-    for (i = cap + 1; i < r; i++) {      /* der Zeiger auf dem Rock, zwei Pixel breit */
-        int32_t px = cx + (int32_t)(sn * (float)i), py = cy - (int32_t)(cs * (float)i);
-        cv_rect(px, py, 2, 2, C_LABEL);
-    }
-    disc(cx, cy, cap, C_SILVER);
-    disc(cx - cap / 3, cy - cap / 3, cap / 2, C_SILVER_HI);
+    aa_line(fx + sn * (cap + 1.0f), fy - cs * (cap + 1.0f), fx + sn * (fr - 1.6f), fy - cs * (fr - 1.6f),
+            r >= 12 ? 2.4f : 1.8f, C_LABEL);   /* der Zeiger auf dem Rock */
+    aa_disc(fx, fy, cap, C_SILVER);
+    aa_disc_a(fx - cap * 0.25f, fy - cap * 0.3f, cap * 0.62f, C_SILVER_HI, 200);
 }
 
 /* ein Kippschalter: Mutter, Hebel nach oben (an) oder unten, die zwei Namen */
 static void toggle(int32_t cx, int32_t cy, int on, const char *up, const char *dn, int hot)
 {
+    float fx = (float)cx, fy = (float)cy, tip = on ? fy - 11.0f : fy + 11.0f;
     ctext(cx, cy - 24, &FONT_XS, up, on ? C_LABEL : C_SUB);
     ctext(cx, cy + 13, &FONT_XS, dn, on ? C_SUB : C_LABEL);
-    disc(cx, cy, 6, hot ? C_SUB : C_KEDGE);
-    disc(cx, cy, 4, C_SILVER);
-    cv_rect(cx - 1, on ? cy - 10 : cy, 3, 11, C_SILVER_HI);
-    disc(cx, on ? cy - 11 : cy + 11, 2, C_SILVER_HI);
+    aa_disc(fx, fy, 6.3f, hot ? C_SUB : C_KEDGE);
+    aa_disc(fx, fy, 4.3f, C_SILVER);
+    aa_line(fx, fy, fx, tip, 3.0f, C_SILVER_HI);
+    aa_disc(fx, tip, 2.4f, C_SILVER_HI);
 }
 
+/* eine LED: aus dunkelrot, an hell mit einem Hof und einem Glanzpunkt */
 static void led(int32_t cx, int32_t cy, int on)
 {
-    disc(cx, cy, 3, on ? C_LED : C_LED_DIM);
-    if (on)
-        cv_rect(cx - 1, cy - 2, 2, 1, RGB(255, 170, 160));
+    float fx = (float)cx, fy = (float)cy;
+    if (on) {
+        aa_disc_a(fx, fy, 5.5f, C_LED, 60);
+        aa_disc(fx, fy, 3.3f, C_LED);
+        aa_disc_a(fx - 0.8f, fy - 1.0f, 1.2f, RGB(255, 200, 190), 220);
+    } else {
+        aa_disc(fx, fy, 3.3f, C_LED_DIM);
+    }
 }
 
 /* ein Regler, der gerade nichts zu tun hat, sagt, woran es liegt (statt stumm zu bleiben) */
@@ -837,7 +896,7 @@ static void draw_patch(uint32_t now)
         x = 78 + (n / 4) * 80;
         y = 28 + (n % 4) * 15;
         jack(x, y + 5, 0);
-        cv_line(x + 6, y + 5, x + 10, y + 5, C_LED);
+        aa_line((float)x + 6.0f, (float)y + 5.0f, (float)x + 10.0f, (float)y + 5.0f, 1.6f, C_LED);
         cv_text(x + 12, y, &FONT_XS, RND_DST_NAME[c->dst], C_LABEL);
         n++;
     }
@@ -925,7 +984,7 @@ static void draw_steps(int32_t s)
         moog_knob(cx, 17, 9, st->pitch, held, 1, 0);
         led(cx, 40, cur && on);
         if (!on)                         /* Velocity 0: der Step schweigt, die LED durchgestrichen */
-            cv_line(cx - 4, 44, cx + 4, 36, C_SUB);
+            aa_line((float)cx - 4.0f, 44.0f, (float)cx + 4.0f, 36.0f, 1.2f, C_SUB);
         moog_knob(cx, 62, 9, st->vel, held, 0, 0);
         n[0] = (char)('1' + i);
         n[1] = 0;
@@ -942,14 +1001,14 @@ static void draw_steps(int32_t s)
             text_cat(t, " D");
             int_text((int32_t)plat_xruns(), t + txt_len(t));
         }
-        cv_text(230 - text_w(&FONT_XS, t), 88, &FONT_XS, t, plat_cpu_pct() > 80u ? C_LED : RGB(70, 70, 76));
+        cv_text(230 - text_w(&FONT_XS, t), 84, &FONT_XS, t, plat_cpu_pct() > 80u ? C_LED : RGB(70, 70, 76));
         if (eng.v.ncab) {                /* gesteckte Kabel */
             char c[12] = "";
             int_text(eng.v.ncab, c);
             text_cat(c, eng.v.ncab == 1 ? " CABLE" : " CABLES");
-            cv_text(10, 88, &FONT_XS, c, C_LED);
+            cv_text(10, 84, &FONT_XS, c, C_LED);
         } else {
-            cv_text(10, 88, &FONT_XS, "KEYS: PATCHBAY", RGB(70, 70, 76));
+            cv_text(10, 84, &FONT_XS, "KEYS: PATCHBAY", RGB(70, 70, 76));
         }
     }
 }
