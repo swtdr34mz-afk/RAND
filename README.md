@@ -26,9 +26,8 @@ If the FM-1 ever runs short of time (the load over 88 % for a second), RAND drop
 ## The battery
 
 The battery is always on screen, top right: a clear symbol filled green, amber under 40 %, red under 15 % (it blinks
-under 10 %), with the percentage beside it. On a USB cable a lightning bolt shows the cell charging, and `USB` when it
-is full. The percentage comes from the cell's voltage along a lithium-ion discharge curve: an estimate, not yet
-calibrated on an FM-1.
+under 10 %). On a USB cable a lightning bolt shows that the FM-1 is on power. The level comes from the cell's voltage
+along a lithium-ion discharge curve: an estimate, not yet calibrated on an FM-1.
 
 ## The sequencer
 

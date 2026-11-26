@@ -1061,12 +1061,11 @@ static void battery_read(void)
         bat.shown = (int)i;
 }
 
-/* der Akku im Kopf: ein klares Symbol (Rahmen, Pol, Füllung in Ampelfarben, beim Laden ein Blitz) und die Prozent
- * groß daneben; unter 10 % blinkt er */
+/* der Akku im Kopf: ein klares Symbol (Rahmen, Pol, Füllung in Ampelfarben, beim Laden ein Blitz); unter 10 %
+ * blinkt er */
 static void draw_battery(int32_t x, int32_t y, uint32_t now)
 {
-    int32_t w = 26, h = 14, fill, pct = bat.shown;
-    char t[8];
+    int32_t w = 30, h = 15, fill, pct = bat.shown;
     uint16_t c;
     if (bat.mode == BAT_NONE)
         return;
@@ -1098,14 +1097,6 @@ static void draw_battery(int32_t x, int32_t y, uint32_t now)
                 if (BOLT[r][q] == '#')
                     cv_rect(bx + q, by + r, 1, 1, C_LABEL);
     }
-    t[0] = 0;
-    if (bat.mode == BAT_USB && pct >= 99)
-        text_cat(t, "USB");
-    else {
-        int_text(pct, t);
-        text_cat(t, "%");
-    }
-    cv_text(x + w + 5, y - 1, &FONT_B, t, pct < 15 && bat.mode == BAT_CELL ? C_LED : C_LABEL);
 }
 
 static void draw(void)
@@ -1124,19 +1115,19 @@ static void draw(void)
         cv_rect(x + 5, 5, 1, 18, C_LABEL);
         cv_text(x + 10, 4, &FONT_XS, "PERCUSSION", C_LABEL);
         cv_text(x + 10, 14, &FONT_XS, "SYNTHESIZER", C_LABEL);
-        led(122, 14, rnd_level(&eng) > 0.3f);
+        led(130, 14, rnd_level(&eng) > 0.3f);
         t[0] = 0;
         int_text((int32_t)((eng.ext ? rnd_bpm(&eng) : (float)set.bpm) + 0.5f), t);
-        cv_text(151 - text_w(&FONT_B, t), 6, &FONT_B, t, eng.ext ? C_LED : C_LABEL);   /* rot: im Takt von außen */
+        cv_text(176 - text_w(&FONT_B, t), 6, &FONT_B, t, eng.ext ? C_LED : C_LABEL);   /* rot: im Takt von außen */
         if (ui.playing) {
             int32_t i;
             for (i = 0; i < 6; i++)
-                cv_rect(156 + i, 9 + i, 1, 12 - 2 * i, C_LED);
+                cv_rect(181 + i, 9 + i, 1, 12 - 2 * i, C_LED);
         } else {
-            cv_rect(155, 10, 9, 9, C_SUB);
+            cv_rect(180, 10, 9, 9, C_SUB);
         }
     }
-    draw_battery(170, 8, now);
+    draw_battery(199, 7, now);
     cv_rect(5, 29, 230, 1, RGB(44, 44, 48));
     cv_blit(0, 0);
     cv_begin(240, 110, C_PANEL);
