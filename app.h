@@ -14,8 +14,9 @@
 #define APP_BLOCK 128u                   /* Frames pro Audioblock: 2.9 ms bei 44.1 kHz (Drums: knapp) */
 
 /* der Speicher: die Einstellungen der App und die Panel-Kalibrierung (die der Plattform) */
-enum { OBJ_SETTINGS, OBJ_PANEL, OBJ_NOBJ };
-#define APP_STORE_MAP {0xFC000u, 0xDC000u}
+/* ... und die 64 Patterns in zwei Hälften zu je 32 (eine Hälfte passt in ein Speicherobjekt) */
+enum { OBJ_SETTINGS, OBJ_PANEL, OBJ_PAT_A, OBJ_PAT_B, OBJ_NOBJ };
+#define APP_STORE_MAP {0xFC000u, 0xDC000u, 0xD8000u, 0xDA000u}
 
 void app_init(void);
 void app_render(int32_t *lr, uint32_t n, uint32_t master_q12);

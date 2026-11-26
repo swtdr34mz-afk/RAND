@@ -81,15 +81,28 @@ with the sound, and the presets bring some.
 | --- | --- |
 | SELECT | Tempo (40 to 280 BPM) |
 | ALGORITHM | CLOCK: /4, /2, x1 ... x128 (from x32 on the rhythm becomes a tone) |
-| PRESET | The eight presets (sound, pattern, cables) |
+| PRESET | The 64 patterns (below) |
 | OCT- / OCT+ | Length |
-| SAVE | TRIGGER: one hit |
+| SAVE | Saves the sound on the pattern place chosen; held + PRESET: on another place |
 | ARP | RAND: new random pitch and velocity rows |
 | PLAY | Start / stop |
-| REC held 1 s | The preset back as it was |
+| REC | Short: TRIGGER, one hit. Held 1 s: the pattern back as it was saved. Held 3 s (places 1-8): as it came from the factory |
 
-Presets: RAND KICK, EBM BASS, METAL HATS, IRON TOMS, CRACK, ZAP, AUDIO RATE, BREAKCORE.
-Settings save themselves once the sequencer stops.
+## 64 patterns
+
+A pattern is everything RAND plays: the sound (every knob), both rows of the sequencer, the tempo and the cables.
+There are 64 places. Places 1-8 come with the factory patterns (RAND KICK, EBM BASS, METAL HATS, IRON TOMS, CRACK,
+ZAP, AUDIO RATE, BREAKCORE), the others are empty.
+
+- **PRESET** picks a place. While the sequencer runs, the next pattern waits until the row is back on step 1, so the
+  change lands in time (its number shows in red until then).
+- **SAVE** saves what you hear on the place you are on. To save somewhere else, hold SAVE, turn PRESET to the place,
+  let go. A `*` after the name means the sound was changed since it was saved.
+- **REC held 1 s** loads the place again as it was saved; **3 s** on places 1-8 brings back the factory pattern.
+- **MIDI Program Change 0-63** picks patterns 1-64.
+
+The patterns are written to the FM-1's flash once the sequencer stops (writing while it plays would stop the sound).
+Settings save themselves the same way.
 
 ## The sound core
 

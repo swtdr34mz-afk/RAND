@@ -82,10 +82,14 @@ wavstop
 tap GLO
 wait 30
 shot switch.png
-# presets carry their cables
-turn PRESET 7
-wait 50
+# patterns: while playing, the next one waits for step 1 (in time); it carries its cables
+midi C0 07 00
+wait 30
+expect next 7
+expect preset 0
+wait 1200
 expect preset 7
+expect next -1
 expect cables 2
 wav breakcore.wav
 wait 3000
@@ -96,6 +100,35 @@ shot rand.png
 tap PLAY
 wait 3000
 expect dirty 0
+# SAVE held + PRESET: save the sound on an empty place (12), then it plays from there
+expect kind12 0
+press SAVE
+turn PRESET 1
+wait 300
+turn PRESET 1
+wait 300
+turn PRESET 1
+wait 300
+turn PRESET 1
+wait 300
+release SAVE
+wait 30
+expect preset 11
+expect kind12 2
+shot saved.png
+wait 2000
+expect bankdirty 0
+expect store_writes >2
+# reboot: the patterns are still there
+reboot
+wait 900
+expect preset 11
+expect kind12 2
+expect kind8 1
+# back to place 1
+midi C0 00 00
+wait 50
+expect preset 0
 # a knob with nothing to act on says why: OSC 2 in RAND KICK (VCO 2 muted), FM / NOISE page (DELAY TIME, COLOR)
 turn PRESET 1
 wait 50

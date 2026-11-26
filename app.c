@@ -10,9 +10,11 @@
  *   SEQ    PITCH 1-4, PITCH 5-8, VEL 1-4, VEL 5-8 (Velocity 0: der Step schweigt)
  *   Tasten = die PATCHBAY: schwarze Tasten sind Ausgänge (OUT), weiße Eingänge (IN). Eine schwarze halten und eine
  *            weiße tippen: ein Kabel gesteckt (nochmal: gezogen). Gehalten: K1 die Stärke ihrer Kabel, REC: alle weg
- *   SELECT Tempo     ALGORITHM   CLOCK /4 .. x128     PRESET   die Presets     OCT- / OCT+   Länge 1..8
- *   PLAY   Start / Stop     SAVE   TRIGGER (ein Schlag)     ARP   RAND: neue Zufalls-Reihen
- *   REC 1 s halten      das Preset ganz zurück (Klang, Pattern, Kabel)
+ *   SELECT Tempo     ALGORITHM   CLOCK /4 .. x128     OCT- / OCT+   Länge 1..8     ARP   RAND: neue Zufalls-Reihen
+ *   PRESET die 64 Patterns (Klang, Reihen, Tempo, Kabel); beim Spielen wechselt es, sobald die Reihe bei Step 1 ist
+ *   SAVE   speichert auf den gewählten Platz; gehalten + PRESET: auf einen anderen Platz
+ *   REC    kurz: TRIGGER (ein Schlag); 1 s: der Platz wie gespeichert; 3 s (Plätze 1-8): ab Werk
+ *   MIDI Program Change 0-63: die Patterns 1-64
  *   MIDI über USB: Clock, START/STOP/CONTINUE (RAND folgt z.B. SIX MACHINES), Noten spielen die Stimme.
  *   Einstellungen speichern sich selbst, sobald der Sequencer steht. */
 #include "fastmath.h"
@@ -107,7 +109,7 @@ static int settings_ok(void)
     for (i = 0; i < set.ncab; i++)
         if (set.cab_src[i] >= RND_NSRC || set.cab_dst[i] >= RND_NDST || set.cab_amt[i] > 127u)
             return 0;
-    return set.magic == SET_MAGIC && set.bpm >= 40u && set.bpm <= 280u && set.preset < RND_NPRESETS;
+    return set.magic == SET_MAGIC && set.bpm >= 40u && set.bpm <= 280u && set.preset < 64u;
 }
 
 static void settings_load(void)
@@ -128,6 +130,153 @@ static void settings_save(void)
     if (plat_store_save(OBJ_SETTINGS, &set, sizeof set) == 0)
         set_dirty = 0;
 }
+
+static void text_cat(char *d, const char *s);
+
+/* ------------------------------------------------------------ die 64 Patterns --- */
+/* Ein Pattern ist alles, was RAND gerade spielt: Klang (alle Regler), die beiden Reihen, das Tempo und die Kabel.
+ * 64 Plätze, die ersten acht ab Werk mit den Presets belegt. Gespeichert in zwei Speicherobjekten zu je 32; auf den
+ * Flash geschrieben wird erst, wenn der Sequencer steht (Schreiben hielte den Ton an). */
+#define NPAT 64
+#define PAT_HALF 32
+#define PAT_MAGIC 0x31544150u            /* "PAT1" */
+enum { PAT_EMPTY, PAT_FACTORY, PAT_USER };
+typedef struct {
+    uint8_t kind;                        /* PAT_* */
+    uint8_t v[RP_COUNT];
+    uint8_t pitch[RND_STEPS], vel[RND_STEPS];
+    uint8_t bpm40, ncab;                 /* Tempo - 40 */
+    uint8_t cab_src[RND_NCABLES], cab_dst[RND_NCABLES], cab_amt[RND_NCABLES];
+} pat_t;
+typedef struct {
+    uint32_t magic;
+    pat_t p[PAT_HALF];
+} pat_half_t;
+_Static_assert(sizeof(pat_half_t) <= PLAT_STORE_MAX, "32 Patterns passen nicht in ein Speicherobjekt");
+static pat_half_t bank[2];
+static uint8_t bank_dirty[2];
+
+static pat_t *pat(uint32_t i) { return &bank[i / PAT_HALF].p[i % PAT_HALF]; }
+
+static void pat_from_set(pat_t *p, uint8_t kind)
+{
+    uint32_t i;
+    p->kind = kind;
+    for (i = 0; i < RP_COUNT; i++)
+        p->v[i] = set.v[i];
+    for (i = 0; i < RND_STEPS; i++) {
+        p->pitch[i] = set.pitch[i];
+        p->vel[i] = set.vel[i];
+    }
+    p->bpm40 = (uint8_t)(set.bpm - 40u);
+    p->ncab = set.ncab;
+    for (i = 0; i < RND_NCABLES; i++) {
+        p->cab_src[i] = set.cab_src[i];
+        p->cab_dst[i] = set.cab_dst[i];
+        p->cab_amt[i] = set.cab_amt[i];
+    }
+}
+
+static void set_from_pat(const pat_t *p)
+{
+    uint32_t i;
+    for (i = 0; i < RP_COUNT; i++)
+        set.v[i] = p->v[i];
+    for (i = 0; i < RND_STEPS; i++) {
+        set.pitch[i] = p->pitch[i];
+        set.vel[i] = p->vel[i];
+    }
+    set.bpm = (uint16_t)(p->bpm40 + 40u);
+    set.ncab = p->ncab;
+    for (i = 0; i < RND_NCABLES; i++) {
+        set.cab_src[i] = p->cab_src[i];
+        set.cab_dst[i] = p->cab_dst[i];
+        set.cab_amt[i] = p->cab_amt[i];
+    }
+}
+
+static int pat_ok(const pat_t *p)
+{
+    uint32_t i;
+    if (p->kind > PAT_USER || p->ncab > RND_NCABLES || p->bpm40 > 240u)
+        return 0;
+    for (i = 0; i < RP_COUNT; i++)
+        if (p->v[i] > 127u)
+            return 0;
+    for (i = 0; i < p->ncab; i++)
+        if (p->cab_src[i] >= RND_NSRC || p->cab_dst[i] >= RND_NDST)
+            return 0;
+    return 1;
+}
+
+/* Werkszustand eines Platzes: 1-8 die Presets, die anderen leer */
+static void pat_factory(uint32_t i)
+{
+    if (i >= RND_NPRESETS) {
+        memset(pat(i), 0, sizeof(pat_t));
+        return;
+    }
+    {
+        settings_t keep = set;               /* (die Presets kommen über die Engine; der Klang jetzt bleibt) */
+        rnd_preset_load(&eng, (int)i);
+        settings_from_engine();
+        pat_from_set(pat(i), PAT_FACTORY);
+        set = keep;
+        engine_from_settings();
+    }
+}
+
+static void bank_load(void)
+{
+    uint32_t h, i;
+    for (h = 0; h < 2u; h++) {
+        int ok = plat_store_load(OBJ_PAT_A + h, &bank[h], sizeof bank[h]) == (int)sizeof bank[h]
+                 && bank[h].magic == PAT_MAGIC;
+        for (i = 0; ok && i < PAT_HALF; i++)
+            if (!pat_ok(&bank[h].p[i]))
+                ok = 0;
+        if (!ok) {                       /* der erste Start (oder etwas Kaputtes): ab Werk */
+            bank[h].magic = PAT_MAGIC;
+            for (i = 0; i < PAT_HALF; i++)
+                pat_factory(h * PAT_HALF + i);
+        }
+    }
+}
+
+static void bank_save(void)
+{
+    uint32_t h;
+    for (h = 0; h < 2u; h++)
+        if (bank_dirty[h] && plat_store_save(OBJ_PAT_A + h, &bank[h], sizeof bank[h]) == 0)
+            bank_dirty[h] = 0;
+}
+
+static const char *pat_name(uint32_t i)
+{
+    static char t[24];
+    char n[4];
+    const pat_t *p = pat(i);
+    n[0] = (char)('0' + (i + 1u) / 10u);
+    n[1] = (char)('0' + (i + 1u) % 10u);
+    n[2] = 0;
+    t[0] = 0;
+    text_cat(t, n);
+    text_cat(t, " ");
+    text_cat(t, p->kind == PAT_FACTORY ? rnd_preset_name((int)i) : p->kind == PAT_USER ? "USER" : "EMPTY");
+    return t;
+}
+
+static int pat_edited(void)              /* der Klang jetzt weicht vom gewählten Platz ab */
+{
+    pat_t now;
+    const pat_t *p = pat(set.preset);
+    if (p->kind == PAT_EMPTY)
+        return 0;
+    memset(&now, 0, sizeof now);
+    pat_from_set(&now, p->kind);
+    return memcmp(&now, p, sizeof now) != 0;
+}
+
 
 /* -------------------------------------------- Wünsche an den Audio-Interrupt --- */
 static volatile int8_t play_req = -1;    /* 1 Start, 0 Stop */
@@ -171,7 +320,10 @@ static struct {
     uint8_t src_used;                    /* mit ihr gesteckt oder gedreht */
     int8_t in_show;                      /* eine weiße Taste allein: was in diesen Eingang geht */
     uint32_t in_until;
-    uint32_t rec_t;
+    uint32_t rec_t, save_t;
+    uint8_t rec_stage;                   /* REC gehalten: 1 neu geladen, 2 ab Werk */
+    uint8_t save_to;                     /* SAVE gehalten + PRESET: der Zielplatz */
+    int8_t next, prev_step;              /* das nächste Pattern, sobald die Reihe wieder vorn ist (-1: keins) */
     uint8_t playing;
     int32_t step_drawn;
     int32_t lvl_drawn;
@@ -399,14 +551,42 @@ static void play_toggle(void)
     ui.redraw = 1;
 }
 
-static void preset_apply(uint32_t p)
+static volatile int8_t pc_req = -1;      /* MIDI Program Change 0..63 (aus dem Audio-Interrupt) */
+
+/* ein Platz wird gespielt: sein Klang, seine Reihen, sein Tempo, seine Kabel (ein leerer: nur gewählt) */
+static void pattern_apply(uint32_t p)
 {
     set.preset = (uint8_t)p;
-    rnd_preset_load(&eng, (int)p);
-    settings_from_engine();
-    if (!ui.playing)
-        hit(eng.steps[0].pitch, 1.0f);
+    ui.next = -1;
+    if (pat(p)->kind != PAT_EMPTY) {
+        set_from_pat(pat(p));
+        engine_from_settings();
+        if (!ui.playing)
+            hit(eng.steps[0].pitch, 1.0f);
+    }
     dirty();
+    ui.redraw = 1;
+}
+
+/* gewählt: gestoppt sofort, beim Spielen, sobald die Reihe wieder bei Step 1 ist (im Takt) */
+static void pattern_select(uint32_t p)
+{
+    if (ui.playing) {
+        ui.next = (int8_t)p;
+        app_say("NEXT", pat_name(p));
+    } else {
+        pattern_apply(p);
+        app_say("PATTERN", pat(p)->kind == PAT_EMPTY ? "EMPTY: SAVE HERE" : pat_name(p));
+    }
+}
+
+static void pattern_save(uint32_t to)
+{
+    pat_from_set(pat(to), PAT_USER);
+    bank_dirty[to / PAT_HALF] = 1;
+    set.preset = (uint8_t)to;
+    dirty();
+    app_say("SAVED", pat_name(to));
 }
 
 static void clock_turn(int32_t e)
@@ -484,10 +664,14 @@ static void button(uint32_t i)
             dirty();
             app_say("PULLED", RND_SRC_NAME[(int)ui.src]);
         } else {
-            ui.rec_t = plat_ms();
+            ui.rec_t = plat_ms();        /* kurz: TRIGGER; 1 s: der Platz neu geladen; 3 s: ab Werk */
+            ui.rec_stage = 0;
         }
         break;
-    case B_SAVE: hit(eng.steps[0].pitch, 1.0f); break;   /* TRIGGER */
+    case B_SAVE:                         /* loslassen: gespeichert; gehalten + PRESET: auf einen anderen Platz */
+        ui.save_t = plat_ms();
+        ui.save_to = set.preset;
+        break;
     case B_ARP:
         rnd_randomize(&eng, plat_ms() * 2654435761u ^ eng.counter);
         settings_from_engine();
@@ -502,14 +686,29 @@ static void button(uint32_t i)
 
 static void held_buttons(uint32_t btn)
 {
-    if (ui.rec_t) {                      /* REC eine Sekunde: das Preset ganz zurück */
-        if (!(btn >> B_REC & 1u))
+    if (ui.rec_t) {
+        uint32_t held = plat_ms() - ui.rec_t;
+        if (!(btn >> B_REC & 1u)) {      /* losgelassen: kurz war es TRIGGER */
+            if (!ui.rec_stage)
+                hit(eng.steps[0].pitch, 1.0f);
             ui.rec_t = 0;
-        else if (plat_ms() - ui.rec_t >= 1000u) {
-            ui.rec_t = 0;
-            preset_apply(set.preset);
-            app_say("RESET", rnd_preset_name(set.preset));
+        } else if (held >= 1000u && ui.rec_stage == 0) {   /* 1 s: der Platz, wie er gespeichert ist */
+            ui.rec_stage = 1;
+            if (pat(set.preset)->kind != PAT_EMPTY) {
+                pattern_apply(set.preset);
+                app_say("RELOADED", pat_name(set.preset));
+            }
+        } else if (held >= 3000u && ui.rec_stage == 1 && set.preset < RND_NPRESETS) {   /* 3 s: ab Werk */
+            ui.rec_stage = 2;
+            pat_factory(set.preset);
+            bank_dirty[set.preset / PAT_HALF] = 1;
+            pattern_apply(set.preset);
+            app_say("FACTORY", pat_name(set.preset));
         }
+    }
+    if (ui.save_t && !(btn >> B_SAVE & 1u)) {
+        ui.save_t = 0;
+        pattern_save(ui.save_to);
     }
 }
 
@@ -565,9 +764,14 @@ static void input(void)
     if ((e = plat_enc(EN_ALGO)) != 0)
         clock_turn(e);
     if ((e = plat_enc(EN_PRESET)) != 0) {
-        uint32_t p = (set.preset + RND_NPRESETS + (e > 0 ? 1u : RND_NPRESETS - 1u)) % RND_NPRESETS;
-        preset_apply(p);
-        app_say("PRESET", rnd_preset_name((int)p));
+        int32_t d = accel(EN_PRESET, e, 2, 4);
+        if (ui.save_t) {                 /* SAVE gehalten: der Zielplatz */
+            ui.save_to = (uint8_t)(((int32_t)ui.save_to + d % NPAT + NPAT) % NPAT);
+            app_say("SAVE TO", pat_name(ui.save_to));
+        } else {
+            int32_t from = ui.next >= 0 ? ui.next : (int32_t)set.preset;
+            pattern_select((uint32_t)((from + d % NPAT + NPAT) % NPAT));
+        }
     }
     if (keys != ui.keys || btn != ui.btn)
         ui.redraw = 1;
@@ -847,12 +1051,12 @@ static void draw_knob(int k, int32_t cx, int32_t y, uint32_t now)
 static void draw_page_keys(int32_t y)
 {
     uint32_t p;
-    int32_t x = 236 - (int32_t)NPAGES * 8 - 6;
+    int32_t x = 232 - (int32_t)NPAGES * 6 - 4;
     for (p = 0; p < NPAGES; p++) {
         if (p == NSOUND)
-            x += 6;
-        cv_rect(x, y, 6, 6, p == ui.page ? C_LABEL : RGB(60, 60, 64));
-        x += 8;
+            x += 4;
+        cv_rect(x, y + 1, 4, 4, p == ui.page ? C_LABEL : RGB(60, 60, 64));
+        x += 6;
     }
 }
 
@@ -945,7 +1149,20 @@ static void draw_middle(uint32_t now)
     }
     {
         int32_t x = cv_text(10, 3, &FONT_XS, PAGE_NAME[ui.page], C_LABEL);
-        cv_text(x + 8, 3, &FONT_XS, rnd_preset_name(set.preset), C_SUB);
+        {   /* der Platz: Nummer und Name; zu lang für die Zeile: nur die Nummer */
+            const char *nm = pat_name(set.preset);
+            char num[4] = {nm[0], nm[1], 0, 0};
+            x = cv_text(x + 8, 3, &FONT_XS, x + 8 + text_w(&FONT_XS, nm) > 146 ? num : nm, C_SUB);
+        }
+        if (pat_edited())
+            x = cv_text(x + 2, 3, &FONT_XS, "*", C_LABEL);
+        if (ui.next >= 0) {              /* wartet auf Step 1 */
+            char t[12] = "> ";
+            t[2] = (char)('0' + (ui.next + 1) / 10);
+            t[3] = (char)('0' + (ui.next + 1) % 10);
+            t[4] = 0;
+            cv_text(x + 6, 3, &FONT_XS, t, C_LED);
+        }
     }
     draw_page_keys(6);
     cv_rect(8, 17, 224, 1, RGB(44, 44, 48));
@@ -1148,6 +1365,8 @@ void app_init(void)
     rnd_init(&eng, SR);
     rnd_fx_memory(&eng, fx_rev, fx_dl, fx_dr);
     settings_load();
+    bank_load();
+    ui.next = -1;
     ui.src = -1;
     ui.in_show = -1;
 }
@@ -1164,7 +1383,9 @@ static void midi_in(void)
         case 0xFBu: rnd_continue(&eng); ui.playing = 1; break;
         case 0xFCu: rnd_stop(&eng); ui.playing = 0; break;
         default:
-            if ((st & 0xF0u) == 0x90u && d2)      /* eine Note: die Stimme, C4 = Grundton, ±2 Oktaven */
+            if ((st & 0xF0u) == 0xC0u && d1 < NPAT)   /* Program Change: Pattern 1-64 */
+                pc_req = (int8_t)d1;
+            else if ((st & 0xF0u) == 0x90u && d2)      /* eine Note: die Stimme, C4 = Grundton, ±2 Oktaven */
                 rnd_trigger(&eng, 0.5f + ((float)d1 - 60.0f) / 48.0f, (float)d2 / 127.0f);
             break;
         }
@@ -1239,12 +1460,20 @@ void app_frame(void)
         char t[48] = "RAND. ";
         text_cat(t, PAGE_NAME[ui.page]);
         text_cat(t, ". ");
-        text_cat(t, rnd_preset_name(set.preset));
+        text_cat(t, pat_name(set.preset));
         ann_say(t, 0, ANN_NOW);
     }
     ann_tick(now);
     ui.playing = (uint8_t)(rnd_running(&eng) || play_req == 1);
     s = rnd_step_now(&eng);
+    if (pc_req >= 0) {                   /* MIDI Program Change: ein Pattern */
+        int8_t p = pc_req;
+        pc_req = -1;
+        pattern_select((uint32_t)p);
+    }
+    if (ui.next >= 0 && (!ui.playing || (s == 0 && ui.prev_step != 0)))
+        pattern_apply((uint32_t)ui.next);
+    ui.prev_step = (int8_t)s;
     lv = (int32_t)(rnd_level(&eng) * 8.0f);
     if (s != ui.step_drawn || lv != ui.lvl_drawn) {
         ui.step_drawn = s;
@@ -1280,8 +1509,12 @@ void app_frame(void)
         }
     }
     /* gespeichert nur, wenn der Sequencer steht: Flash schreiben hält den Audio-Interrupt an (Aussetzer) */
-    if (!ui.playing && set_dirty && now - dirty_at > 1500u)
-        settings_save();
+    if (!ui.playing && now - dirty_at > 1500u) {
+        if (set_dirty)
+            settings_save();
+        if (bank_dirty[0] || bank_dirty[1])
+            bank_save();
+    }
     if (ui.redraw) {
         ui.redraw = 0;
         draw();
@@ -1307,6 +1540,12 @@ int app_expect(const char *what, int *got)
         *got = rnd_clock_index(&eng);
     else if (!strcmp(what, "override"))
         *got = eng.clock_override;
+    else if (!strcmp(what, "next"))
+        *got = ui.next;
+    else if (!strncmp(what, "kind", 4))  /* kindN: Platz N (1..64) leer / Werk / eigen */
+        *got = pat((uint32_t)atoi(what + 4) - 1u)->kind;
+    else if (!strcmp(what, "bankdirty"))
+        *got = bank_dirty[0] | bank_dirty[1] << 1;
     else if (!strcmp(what, "cables"))
         *got = eng.v.ncab;
     else if (!strcmp(what, "eco"))
