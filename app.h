@@ -10,6 +10,7 @@
 #define APP_NAME "RAND"
 #define APP_SPLASH_RGB RGB(236, 236, 240)
 #define APP_SPLASH                       /* app_splash: RANDs eigener Startbildschirm */
+#define APP_BATTERY_RAW                  /* plat_battery_raw, plat_battery_charging: die Akku-Anzeige in Prozent */
 #define APP_BLOCK 128u                   /* Frames pro Audioblock: 2.9 ms bei 44.1 kHz (Drums: knapp) */
 
 /* der Speicher: die Einstellungen der App und die Panel-Kalibrierung (die der Plattform) */

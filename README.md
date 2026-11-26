@@ -23,6 +23,13 @@ half-band filter, so high notes and FM stay clean. Each VCO drifts a few cents o
 If the FM-1 ever runs short of time (the load over 88 % for a second), RAND drops the oversampling by itself and shows
 **ECO** next to the CPU load, before there could be dropouts.
 
+## The battery
+
+The battery is always on screen, top right: a clear symbol filled green, amber under 40 %, red under 15 % (it blinks
+under 10 %), with the percentage beside it. On a USB cable a lightning bolt shows the cell charging, and `USB` when it
+is full. The percentage comes from the cell's voltage along a lithium-ion discharge curve: an estimate, not yet
+calibrated on an FM-1.
+
 ## The sequencer
 
 Eight steps, each with a **pitch** and a **velocity** knob, length 1 to 8. The **CLOCK** runs from /4 to x128 of the

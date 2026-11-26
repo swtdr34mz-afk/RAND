@@ -954,6 +954,101 @@ static void draw_steps(int32_t s)
     }
 }
 
+/* ------------------------------------------------------------------ der Akku --- */
+/* Prozent aus der Spannung: die Messung des Akku-Teilers (fm1-base: Stufen bei 531 / 561 / 591 Zählern, voll um
+ * 620 = 4.2 V) in Volt, dann die Entladekurve einer Li-Ionen-Zelle (unter Last flach in der Mitte, steil an den
+ * Enden). Geglättet und nur in ganzen Schritten bewegt, damit die Zahl nicht flackert. Am FM-1 noch nicht
+ * nachgemessen: ein Schätzwert, die Richtung stimmt. */
+enum { BAT_NONE, BAT_CELL, BAT_CHARGING, BAT_USB };
+static const float LI_V[9] = {3.40f, 3.50f, 3.60f, 3.70f, 3.80f, 3.90f, 4.00f, 4.10f, 4.20f};
+static const float LI_P[9] = {0.0f, 6.0f, 15.0f, 30.0f, 48.0f, 64.0f, 78.0f, 90.0f, 100.0f};
+static struct { float pct; int shown, mode; } bat = {-1.0f, -1, BAT_NONE};
+
+static void battery_read(void)
+{
+    int32_t raw = plat_battery_raw(), ch = plat_battery_charging(), bars = plat_battery(), i;
+    float v, p;
+#ifdef PLAT_HOST
+    {   /* der Simulator: RAND_BATT="Zähler,Laden" für die Bildschirmfotos (z.B. "548,0" oder "575,2") */
+        const char *e = getenv("RAND_BATT");
+        if (e) {
+            raw = atoi(e);
+            ch = strchr(e, ',') ? atoi(strchr(e, ',') + 1) : 0;
+        }
+    }
+#endif
+    if (raw <= 0 && bars < 0) {
+        bat.mode = BAT_NONE;             /* (noch nicht gelesen, oder der Browser-Emulator) */
+        return;
+    }
+    bat.mode = ch == 2 ? BAT_CHARGING : (bars == 4 || ch == 1) ? BAT_USB : BAT_CELL;
+    if (raw > 0) {
+        v = (float)raw * (4.2f / 620.0f);
+        if (v <= LI_V[0])
+            p = 0.0f;
+        else if (v >= LI_V[8])
+            p = 100.0f;
+        else {
+            for (i = 0; v > LI_V[i + 1]; i++)
+                ;
+            p = LI_P[i] + (LI_P[i + 1] - LI_P[i]) * (v - LI_V[i]) / (LI_V[i + 1] - LI_V[i]);
+        }
+    } else {
+        p = bars >= 3 ? 100.0f : (float)bars * 33.0f;   /* ohne Messwert: die Stufen */
+    }
+    bat.pct = bat.pct < 0.0f ? p : bat.pct + (p - bat.pct) * 0.15f;
+    i = (int32_t)(bat.pct + 0.5f);
+    if (bat.shown < 0 || i > bat.shown + 1 || i < bat.shown - 1 || i == 0 || i == 100)
+        bat.shown = (int)i;
+}
+
+/* der Akku im Kopf: ein klares Symbol (Rahmen, Pol, Füllung in Ampelfarben, beim Laden ein Blitz) und die Prozent
+ * groß daneben; unter 10 % blinkt er */
+static void draw_battery(int32_t x, int32_t y, uint32_t now)
+{
+    int32_t w = 26, h = 14, fill, pct = bat.shown;
+    char t[8];
+    uint16_t c;
+    if (bat.mode == BAT_NONE)
+        return;
+    cv_rect(x - 2, y - 3, 240 - 5 - (x - 2), h + 6, C_PANEL);   /* (über einer langen Meldung) */
+    if (pct < 0)
+        pct = 0;
+    c = pct >= 40 ? RGB(70, 220, 110) : pct >= 15 ? RGB(255, 190, 40) : C_LED;
+    if (bat.mode == BAT_CHARGING || bat.mode == BAT_USB)
+        c = RGB(70, 220, 110);
+    /* der Rahmen, 2 px, mit 1 px Luft zur Füllung; der Pol rechts */
+    cv_rect(x, y, w, h, C_LABEL);
+    cv_rect(x + 2, y + 2, w - 4, h - 4, C_PANEL);
+    cv_rect(x + w, y + 4, 3, h - 8, C_LABEL);
+    fill = (pct * (w - 6) + 50) / 100;
+    if (pct > 0 && fill < 2)
+        fill = 2;
+    if (!(pct < 10 && bat.mode == BAT_CELL && (now / 500u) & 1u))
+        cv_rect(x + 3, y + 3, fill, h - 6, c);
+    if (bat.mode != BAT_CELL) {          /* ein Blitz: am Netz (8 x 10 Pixel, dunkel umrandet) */
+        static const char *const BOLT[10] = {"....##..", "...##...", "..##....", ".##.....", "#######.",
+                                             "....##..", "...##...", "..##....", ".##.....", "##......"};
+        int32_t bx = x + w / 2 - 4, by = y + 2, r, q;
+        for (r = 0; r < 10; r++)
+            for (q = 0; q < 8; q++)
+                if (BOLT[r][q] == '#')
+                    cv_rect(bx + q - 1, by + r, 3, 1, C_PANEL);
+        for (r = 0; r < 10; r++)
+            for (q = 0; q < 8; q++)
+                if (BOLT[r][q] == '#')
+                    cv_rect(bx + q, by + r, 1, 1, C_LABEL);
+    }
+    t[0] = 0;
+    if (bat.mode == BAT_USB && pct >= 99)
+        text_cat(t, "USB");
+    else {
+        int_text(pct, t);
+        text_cat(t, "%");
+    }
+    cv_text(x + w + 5, y - 1, &FONT_B, t, pct < 15 && bat.mode == BAT_CELL ? C_LED : C_LABEL);
+}
+
 static void draw(void)
 {
     uint32_t now = plat_ms();
@@ -970,23 +1065,19 @@ static void draw(void)
         cv_rect(x + 5, 5, 1, 18, C_LABEL);
         cv_text(x + 10, 4, &FONT_XS, "PERCUSSION", C_LABEL);
         cv_text(x + 10, 14, &FONT_XS, "SYNTHESIZER", C_LABEL);
-        led(158, 14, rnd_level(&eng) > 0.3f);
+        led(122, 14, rnd_level(&eng) > 0.3f);
         t[0] = 0;
-        if (eng.ext) {
-            text_cat(t, "EXT ");
-            int_text((int32_t)(rnd_bpm(&eng) + 0.5f), t + 4);
-        } else {
-            int_text(set.bpm, t);
-        }
-        cv_text(214 - text_w(&FONT_XS, t), 9, &FONT_XS, t, eng.ext ? C_LED : C_LABEL);
+        int_text((int32_t)((eng.ext ? rnd_bpm(&eng) : (float)set.bpm) + 0.5f), t);
+        cv_text(151 - text_w(&FONT_B, t), 6, &FONT_B, t, eng.ext ? C_LED : C_LABEL);   /* rot: im Takt von außen */
         if (ui.playing) {
             int32_t i;
             for (i = 0; i < 6; i++)
-                cv_rect(219 + i, 9 + i, 1, 12 - 2 * i, C_LED);
+                cv_rect(156 + i, 9 + i, 1, 12 - 2 * i, C_LED);
         } else {
-            cv_rect(218, 9, 10, 10, C_SUB);
+            cv_rect(155, 10, 9, 9, C_SUB);
         }
     }
+    draw_battery(170, 8, now);
     cv_rect(5, 29, 230, 1, RGB(44, 44, 48));
     cv_blit(0, 0);
     cv_begin(240, 110, C_PANEL);
@@ -1118,7 +1209,10 @@ void app_frame(void)
         ui.redraw = 1;
     }
     if (now - ui.load_at >= 500u) {
-        uint32_t l = plat_cpu_pct() | plat_xruns() << 8;
+        uint32_t l;
+        battery_read();
+        l = plat_cpu_pct() | plat_xruns() << 8 | (uint32_t)(bat.shown & 0x7F) << 16 | (uint32_t)bat.mode << 23
+            | ((bat.shown < 10 && bat.mode == BAT_CELL) ? (now / 500u & 1u) << 25 : 0u);
         ui.load_at = now;
         if (l != ui.load_shown) {
             ui.load_shown = l;
